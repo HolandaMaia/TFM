@@ -1,93 +1,93 @@
 import streamlit as st
-from pyliferisk import Actuarial
-from pyliferisk.mortalitytables import GKM95
-import matplotlib.pyplot as plt
+import pandas as pd
+import yfinance as yf
+from pypfopt import EfficientFrontier, risk_models, expected_returns
+from datetime import datetime
+import plotly.graph_objects as go
+import plotly.graph_objects as go
 
-# Título da aplicação
-st.set_page_config(page_title="Calculadora Atuarial de Aposentadoria", layout="centered")
-st.title("🧮 Calculadora Atuarial de Reserva para Aposentadoria")
+# 📥 Carregar os dados
+df = pd.read_excel("C:/Users/mathe/OneDrive/Área de Trabalho/MASTER/FLI/FMI/dados/ativos_totais.xlsx")
 
-st.markdown("""
-Esta aplicação estima o valor da **reserva necessária** para garantir uma **renda constante na aposentadoria**.
-Os cálculos são feitos com base em dados atuariais da tábua de mortalidade **GKM95** e assumem uma taxa de juros real.
-""")
+st.set_page_config(page_title="Carteira Ótima Markowitz", layout="wide")
+st.title("📊 Otimizador de Carteira Global (Markowitz)")
 
-st.header("📝 Parâmetros do Usuário")
+# 📌 FILTROS
+st.sidebar.header("🎯 Selecione os ativos")
+tipo = st.sidebar.multiselect("Tipo de Ativo", df["Tipo de Ativo"].dropna().unique())
+filtro = df[df["Tipo de Ativo"].isin(tipo)] if tipo else df
 
-col1, col2 = st.columns(2)
-with col1:
-    
-    idade_atual = st.number_input("📌 Idade atual", min_value=18, max_value=100, value=35)
-    renda_mensal = st.number_input("💶 Renda mensal desejada (€)", min_value=0.0, value=1000.0)
+pais = st.sidebar.multiselect("País", filtro["País"].dropna().unique())
+filtro = filtro[filtro["País"].isin(pais)] if pais else filtro
 
-with col2:
-    idade_aposentadoria = st.number_input("🎯 Idade de aposentadoria", min_value=idade_atual + 1, max_value=100, value=67)
-    taxa_juros = st.number_input("📉 Taxa de juros anual (%)", min_value=0.0, max_value=10.0, value=1.0, step=0.1) / 100
+setor = st.sidebar.multiselect("Setor", filtro["Setor"].dropna().unique())
+filtro = filtro[filtro["Setor"].isin(setor)] if setor else filtro
 
+opcoes = filtro["Nome Curto"] + " (" + filtro["Ticker"] + ")"
+selecionados = st.sidebar.multiselect("Ativos disponíveis", opcoes.tolist(), max_selections=8)
 
-# Cálculos
-renda_anual = renda_mensal * 12
-anos_ate_aposentadoria = idade_aposentadoria - idade_atual
+data_inicio = st.sidebar.date_input("Data inicial", datetime(2010, 1, 1))
+data_fim = st.sidebar.date_input("Data final", datetime.today())
 
-mt = Actuarial(nt=GKM95, i=taxa_juros)
-expectativa_vida = mt.ex[idade_aposentadoria]  # expectativa de vida futura aos 67 anos
-anos_de_renda = int(round(expectativa_vida))
+if selecionados:
+    tickers = [s.split("(")[-1].replace(")", "").strip() for s in selecionados]
 
-v = 1 / (1 + mt.i)
-valores_por_ano = [renda_anual * (v ** (ano + 1)) for ano in range(anos_de_renda)]
-valor_na_aposentadoria = sum(valores_por_ano)
-desconto_total = v ** anos_ate_aposentadoria
-valor_presente_hoje = valor_na_aposentadoria * desconto_total
+    try:
+        st.info("⏳ Baixando dados de mercado...")
+        dados_brutos = yf.download(
+            tickers,
+            start=data_inicio,
+            end=data_fim,
+            progress=False,
+            auto_adjust=True
+        )
 
-# Resultados
-st.subheader("📊 Resultados:")
-col1, col2, col3 = st.columns(3)
+        dados = dados_brutos["Close"] if "Close" in dados_brutos else dados_brutos
+        dados = dados.dropna(axis=1)
 
-with col1:
-    st.metric(label="Reserva HOJE (€)", value=f"{valor_presente_hoje:,.2f}")
+        if dados.empty:
+            st.error("❌ Nenhum dado de preço válido foi encontrado para os ativos selecionados.")
+        else:
+            st.success(f"✅ Dados baixados com sucesso para {len(dados.columns)} ativos.")
 
-with col2:
-    st.metric(label="Reserva NA APOSENTADORIA (€)", value=f"{valor_na_aposentadoria:,.2f}")
+            mu = expected_returns.mean_historical_return(dados)
+            S = risk_models.sample_cov(dados)
+            ef = EfficientFrontier(mu, S)
+            ef.max_sharpe()
+            pesos_limpos = ef.clean_weights()
 
-with col3:
-    st.metric(label="Expectativa de vida aos 67", value=f"{expectativa_vida:.1f} anos")
+            st.subheader("💼 Pesos ótimos da carteira (Max Sharpe)")
+            colunas = st.columns(len(pesos_limpos))
+            for i, (ticker, peso) in enumerate(pesos_limpos.items()):
+                with colunas[i]:
+                    st.metric(label=ticker, value=f"{peso*100:.2f} %")
 
+            st.subheader("📈 Indicadores de Performance")
+            ret, vol, sharpe = ef.portfolio_performance()
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Retorno Esperado", f"{ret*100:.2f}%")
+            c2.metric("Volatilidade", f"{vol*100:.2f}%")
+            c3.metric("Sharpe Ratio", f"{sharpe:.2f}")
 
-# Gráfico da reserva acumulada ao longo do tempo
-idades_acumuladas = list(range(idade_atual, idade_aposentadoria + 1))
-valores_acumulados_ano_a_ano = [
-    valor_na_aposentadoria / ((1 + taxa_juros) ** (anos_ate_aposentadoria - t))
-    for t in range(anos_ate_aposentadoria + 1)
-]
+            st.subheader("📊 Gráfico de Evolução dos Ativos")
+            for ticker in dados.columns:
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=dados.index, y=dados[ticker], mode='lines', name=ticker))
+                fig.update_layout(title=f"Evolução: {ticker}", xaxis_title="Data", yaxis_title="Preço")
+                st.plotly_chart(fig, use_container_width=True)
 
-fig, ax = plt.subplots(figsize=(10, 4))
-ax.plot(idades_acumuladas, valores_acumulados_ano_a_ano, marker='o', color='teal')
-ax.set_title("Evolução da Reserva Acumulada Até a Aposentadoria")
-ax.set_xlabel("Idade")
-ax.set_ylabel("Reserva acumulada (€)")
-ax.grid(True, linestyle='--', alpha=0.7)
-st.pyplot(fig)
+            st.subheader("📉 Evolução da Carteira Ponderada")
+            dados_norm = dados / dados.iloc[0]
+            pesos_series = pd.Series(pesos_limpos)
+            carteira_valor = dados_norm.dot(pesos_series)
 
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=carteira_valor.index, y=carteira_valor, mode='lines', name='Carteira'))
+            fig.update_layout(title="Valor Normalizado da Carteira", xaxis_title="Data", yaxis_title="Valor")
+            st.plotly_chart(fig, use_container_width=True)
 
-# Faixa de idades após aposentadoria
-idades_apos = list(range(idade_aposentadoria, idade_aposentadoria + anos_de_renda))
+    except Exception as e:
+        st.error(f"Erro ao calcular a carteira: {e}")
 
-# Capital acumulado com e sem juros, ano a ano após aposentadoria
-capital_com_juros = [valor_na_aposentadoria]
-capital_sem_juros = [valor_na_aposentadoria]
-
-for _ in range(1, anos_de_renda):
-    capital_com_juros.append(capital_com_juros[-1] * (1 + taxa_juros) - renda_anual)
-    capital_sem_juros.append(capital_sem_juros[-1] - renda_anual)
-
-# Gráfico de comparação
-fig3, ax3 = plt.subplots(figsize=(10, 4))
-ax3.plot(idades_apos, capital_com_juros, label="Com juros", marker='o')
-ax3.plot(idades_apos, capital_sem_juros, label="Sem juros", linestyle='--', marker='o')
-ax3.axhline(0, color='gray', linestyle=':', linewidth=1)
-ax3.set_title("Evolução do Capital Pós-Aposentadoria")
-ax3.set_xlabel("Idade")
-ax3.set_ylabel("Capital acumulado (€)")
-ax3.grid(True, linestyle='--', alpha=0.7)
-ax3.legend()
-st.pyplot(fig3)
+else:
+    st.warning("Selecione ao menos um ativo para montar a carteira.")
