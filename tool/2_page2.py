@@ -771,3 +771,13 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
+    
+def carregar_universo(path="dados/ativos_totais.xlsx"):
+    """Carrega o universo de ativos a partir de um arquivo Excel."""
+    try:
+        df = pd.read_excel(path)
+        return df
+    except Exception as e:
+        st.error(f"Erro ao carregar base de ativos: {e}")
+        return pd.DataFrame()
