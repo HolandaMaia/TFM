@@ -126,16 +126,54 @@ def mostrar_tabela_ativos(dados, pesos):
     })
     st.dataframe(tabela, use_container_width=True)
 
+from plotly.subplots import make_subplots
+import plotly.graph_objects as go
 
-def mostrar_backtest(dados, pesos, benchmark_ticker="^BVSP"):
-    st.subheader("Backtest")
-    benchmark = yf.download(benchmark_ticker, start=dados.index.min(), end=dados.index.max(), auto_adjust=True)["Close"]
+import numpy as np
+import pandas as pd
+
+import numpy as np
+import pandas as pd
+
+def mostrar_graficos_ativos(dados, pesos):
+    st.subheader("📈 Histórico de Preços por Ativo")
+    # Preenche os dados faltantes
+    dados = dados.ffill()
+    # Para cada ticker com peso, cria um gráfico
+    for ticker in pesos.index:
+        st.markdown(f"**{ticker}**")
+        st.line_chart(dados[[ticker]])
+
+
+
+def mostrar_backtest(dados, pesos, benchmark_ticker=None):
+    st.subheader("📈 Backtest da Carteira")
+
+    # Fallback se o usuário não selecionar nenhum benchmark
+    if benchmark_ticker is None:
+        benchmark_ticker = "^GSPC"  # S&P 500 como padrão
+    # Baixar dados do benchmark
+    benchmark = yf.download(
+        benchmark_ticker,
+        start=dados.index.min(),
+        end=dados.index.max(),
+        auto_adjust=True
+    )["Close"]
+    # Retornos logarítmicos da carteira
     returns = np.log(dados / dados.shift(1)).dropna()
     carteira = (1 + returns.dot(pesos)).cumprod()
+    # Retornos acumulados do benchmark
     bench_ret = (1 + benchmark.pct_change().dropna()).cumprod()
+    # Gráfico interativo
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=carteira.index, y=carteira, name="Carteira"))
     fig.add_trace(go.Scatter(x=bench_ret.index, y=bench_ret, name=benchmark_ticker))
+    fig.update_layout(
+        title="Evolução Acumulada",
+        xaxis_title="Data",
+        yaxis_title="Valor Normalizado",
+        legend_title="Séries"
+    )
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -184,15 +222,15 @@ selecionados = [nomes_para_tickers[nome] for nome in selecionados_nomes]
 # Parâmetros adicionais
 anos = st.sidebar.slider("Horizonte (anos)", 1, 20, 10)
 frequencia = st.sidebar.selectbox("Frequência", ["1d", "1wk", "1mo"])
+# 📌 Caixa para seleção de Benchmark (apenas ativos tipo "Index")
+benchmarks_df = universo[universo["Tipo de Ativo"] == "INDEX"]
+benchmarks_opcoes = benchmarks_df.set_index("Nome Curto")["Ticker"].dropna().to_dict()
+benchmark_escolhido_nome = st.sidebar.selectbox("Benchmark", ["Nenhum"] + list(benchmarks_opcoes.keys()))
+benchmark_ticker = benchmarks_opcoes.get(benchmark_escolhido_nome) if benchmark_escolhido_nome != "Nenhum" else None
 btn = st.sidebar.button("Otimizar Carteira")
 
 
-
-
-
-
-
-
+#----------------------------------------------------------------------------------------------------------------------------------------------------------------------
 if btn and selecionados:
     data_inicio = pd.Timestamp.today() - pd.DateOffset(years=anos)
     data_fim = pd.Timestamp.today()
@@ -202,6 +240,7 @@ if btn and selecionados:
 
     mostrar_kpis(metrics)
     mostrar_tabela_ativos(dados, pesos)
+    mostrar_graficos_ativos(dados, pesos)
     mostrar_performance(dados, pesos)
     mostrar_fronteira_heatmap(dados, pesos)
     mostrar_backtest(dados, pesos)
