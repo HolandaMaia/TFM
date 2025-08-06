@@ -243,63 +243,66 @@ def mostrar_metricas_performance(metricas: dict):
 
 # ---------------------------------------------------------------------
 
-import yfinance as yf
-import pandas as pd
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-import numpy as np
+def treinar_modelo_ml(df: pd.DataFrame):
+    """Treina um modelo de machine learning para prever o preço futuro."""
+    from sklearn.ensemble import RandomForestRegressor
+    from sklearn.model_selection import train_test_split
+    from sklearn.metrics import mean_squared_error
 
-def prever_preco_ativo_ml(ticker: str, periodo="1y", intervalo="1d"):
-    """
-    Treina um modelo de machine learning (Random Forest) para prever o preço de fechamento
-    de um ativo com base em indicadores técnicos.
-    """
-    dados = yf.download(ticker, period=periodo, interval=intervalo)
+    df = df.copy()
+    df['Returns'] = df['Close'].pct_change().fillna(0)
+    df['Future Close'] = df['Close'].shift(-1).fillna(method='ffill')
 
-    if dados.empty:
-        return None, "Dados não disponíveis para esse ativo."
+    X = df[['Open', 'High', 'Low', 'Close', 'Volume', 'Returns']].dropna()
+    y = df['Future Close'].loc[X.index]
 
-    df = dados.copy()
-    df['Retorno'] = df['Close'].pct_change()
-    df['Retorno_1d'] = df['Close'].pct_change(1)
-    df['Retorno_5d'] = df['Close'].pct_change(5)
-    df['Media_5d'] = df['Close'].rolling(window=5).mean()
-    df['Media_10d'] = df['Close'].rolling(window=10).mean()
-    df['Volatilidade_5d'] = df['Close'].rolling(window=5).std()
-    df['Volatilidade_10d'] = df['Close'].rolling(window=10).std()
-    df = df.dropna()
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-    # Features (X) e Target (y)
-    X = df[['Retorno_1d', 'Retorno_5d', 'Media_5d', 'Media_10d', 'Volatilidade_5d', 'Volatilidade_10d']]
-    y = df['Close']
+    model = RandomForestRegressor(n_estimators=100, random_state=42)
+    model.fit(X_train, y_train)
 
-    # Dividir dados em treino/teste
-    X_train, X_test, y_train, y_test = train_test_split(X, y, shuffle=False, test_size=0.2)
+    predictions = model.predict(X_test)
+    mse = mean_squared_error(y_test, predictions)
 
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
+    st.subheader("📈 Machine Learning Model Results")
+    st.write(f"Mean Squared Error: {mse:.4f}")
 
-    modelo = RandomForestRegressor(n_estimators=100, random_state=42)
-    modelo.fit(X_train_scaled, y_train)
-
-    y_pred = modelo.predict(X_test_scaled)
-
-    resultados = {
-        "MAE": mean_absolute_error(y_test, y_pred),
-        "RMSE": np.sqrt(mean_squared_error(y_test, y_pred)),
-        "R2": r2_score(y_test, y_pred),
-        "y_test": y_test,
-        "y_pred": y_pred
-    }
-
-    return resultados, None
-
-# ---------------------------------------------------------------------
+    return model
 
 
+def mostrar_resultados_ml(model, df: pd.DataFrame):
+    """Exibe os resultados do modelo de machine learning."""
+    df = df.copy()
+    df['Returns'] = df['Close'].pct_change().fillna(0)  # ✅ Adicionando aqui para evitar erro
+    df['Predicted Close'] = model.predict(df[['Open', 'High', 'Low', 'Close', 'Volume', 'Returns']].fillna(0))
+
+    st.subheader("📊 Predicted vs Actual Close Prices")
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=df.index,
+        y=df['Close'],
+        mode='lines',
+        name='Actual Close',
+        line=dict(color='blue')
+    ))
+    fig.add_trace(go.Scatter(
+        x=df.index,
+        y=df['Predicted Close'],
+        mode='lines',
+        name='Predicted Close',
+        line=dict(color='orange')
+    ))
+
+    fig.update_layout(
+        title="Actual vs Predicted Close Prices",
+        xaxis_title="Date",
+        yaxis_title="Price",
+        height=400,
+        margin=dict(t=20, b=40)
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
 
 # ---------------------------------------------------------------------
 # Página principal
@@ -349,6 +352,10 @@ if btn and ticker:
         mostrar_grafico_tecnico(ticker, dados)
         metricas = calcular_metricas_performance(dados)
         mostrar_metricas_performance(metricas)
+        resultados = treinar_modelo_ml(dados)  # 'dados' deve ter a coluna 'Close'
+        mostrar_resultados_ml(resultados, dados)
+
+
 
         
 
