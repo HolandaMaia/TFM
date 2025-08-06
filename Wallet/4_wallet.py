@@ -16,6 +16,7 @@ import streamlit as st
 st.set_page_config(page_title="Dashboard da Carteira", layout="wide")
 
 #----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+@st.cache_resource
 def carregar_universo(path="dados/ativos_totais.xlsx"):
     """Carrega o universo de ativos a partir de um arquivo Excel."""
     try:

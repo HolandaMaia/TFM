@@ -92,7 +92,7 @@ def mostrar_resultado(res, idade_atual, idade_apos, taxa_juros):
         for t in range(anos_ate_apos + 1)
     ]
     df_reserva = pd.DataFrame({"Idade": idades, "Reserva acumulada (€)": valores_ano_a_ano}).set_index("Idade")
-    st.line_chart(df_reserva)
+    st.bar_chart(df_reserva)
 
     st.markdown("### 📉 Evolução do Capital Pós-Aposentadoria")
     idades_apos = list(range(idade_apos, idade_apos + res['anos_de_renda']))
@@ -127,8 +127,8 @@ st.sidebar.header("Parâmetros do Usuário")
 locais_disponiveis = df_mortalidade['local'].dropna().unique()
 regiao = st.sidebar.selectbox("Região", sorted(locais_disponiveis))
 idade_atual = st.sidebar.number_input("Idade atual", min_value=18, max_value=100, value=35)
-renda_mensal = st.sidebar.number_input("Renda mensal desejada (€)", min_value=0.0, value=1000.0)
 idade_apos = st.sidebar.number_input("Idade de aposentadoria", min_value=idade_atual + 1, max_value=100, value=67)
+renda_mensal = st.sidebar.number_input("Renda mensal desejada (€)", min_value=0.0, value=1000.0)
 taxa_juros = st.sidebar.number_input("Taxa de juros anual (%)", min_value=0.0, max_value=10.0, value=1.0, step=0.1) / 100
 
 if st.sidebar.button("Calcular Reserva"):
