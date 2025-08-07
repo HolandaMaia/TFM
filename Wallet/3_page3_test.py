@@ -243,67 +243,144 @@ def mostrar_metricas_performance(metricas: dict):
 
 # ---------------------------------------------------------------------
 
-def treinar_modelo_ml(df: pd.DataFrame):
-    """Treina um modelo de machine learning para prever o preço futuro."""
-    from sklearn.ensemble import RandomForestRegressor
-    from sklearn.model_selection import train_test_split
-    from sklearn.metrics import mean_squared_error
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error
+
+
+import pandas as pd
+import numpy as np
+import streamlit as st
+import plotly.graph_objects as go
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import r2_score, mean_absolute_error
+
+
+def modelo_ml_prever_futuro(df: pd.DataFrame):
+    """Permite prever os próximos 30 dias com ML, escolhendo janela e visualizando incertezas."""
 
     df = df.copy()
-    df['Returns'] = df['Close'].pct_change().fillna(0)
-    df['Future Close'] = df['Close'].shift(-1).fillna(method='ffill')
 
-    X = df[['Open', 'High', 'Low', 'Close', 'Volume', 'Returns']].dropna()
-    y = df['Future Close'].loc[X.index]
+    # ✅ Verifica se a coluna 'Close' existe
+    if 'Close' not in df.columns:
+        st.error("❌ A coluna 'Close' não está presente no DataFrame fornecido.")
+        st.write("🔎 Colunas disponíveis no DataFrame:", list(df.columns))
+        return
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    # ✅ Dropna só se 'Close' existe
+    df = df.dropna(subset=['Close'])
 
+    # 📏 Parâmetro: tamanho da janela deslizante
+    window_size = st.slider("⏳ Select window size (past days used to predict the future)", 10, 90, 30, step=5)
+
+    close_series = df['Close'].values
+    X, y = [], []
+
+    for i in range(len(close_series) - window_size):
+        X.append(close_series[i:i+window_size])
+        y.append(close_series[i+window_size])
+
+    X = np.array(X)
+    y = np.array(y)
+
+    if len(X) < 30:
+        st.warning("⚠️ Dados insuficientes para treinar o modelo.")
+        return
+
+    # Separação treino/teste
+    split_index = int(len(X) * 0.8)
+    X_train, X_test = X[:split_index], X[split_index:]
+    y_train, y_test = y[:split_index], y[split_index:]
+
+    # Modelo
     model = RandomForestRegressor(n_estimators=100, random_state=42)
     model.fit(X_train, y_train)
 
-    predictions = model.predict(X_test)
-    mse = mean_squared_error(y_test, predictions)
+    # Métricas
+    y_pred_train = model.predict(X_train)
+    y_pred_test = model.predict(X_test)
 
-    st.subheader("📈 Machine Learning Model Results")
-    st.write(f"Mean Squared Error: {mse:.4f}")
+    r2_train = r2_score(y_train, y_pred_train)
+    r2_test = r2_score(y_test, y_pred_test)
+    mae_test = mean_absolute_error(y_test, y_pred_test)
+    confidence = np.mean([model.score(X_train, y_train), model.score(X_test, y_test)])
 
-    return model
+    # 🎯 Métricas visuais
+    st.subheader("🤖 Machine Learning Performance")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("🎲 Model Confidence", f"{confidence:.2%}")
+    col2.metric("📈 Train R²", f"{r2_train:.2%}")
+    col3.metric("✅ Test R²", f"{r2_test:.2%}")
+    col4.metric("📉 MAE (Test)", f"{mae_test:.2f}")
 
+    # Previsão iterativa para os próximos 30 dias
+    ultimos_dias = list(close_series[-window_size:])
+    previsoes = []
+    previsoes_std = []
 
-def mostrar_resultados_ml(model, df: pd.DataFrame):
-    """Exibe os resultados do modelo de machine learning."""
-    df = df.copy()
-    df['Returns'] = df['Close'].pct_change().fillna(0)  # ✅ Adicionando aqui para evitar erro
-    df['Predicted Close'] = model.predict(df[['Open', 'High', 'Low', 'Close', 'Volume', 'Returns']].fillna(0))
+    for _ in range(30):
+        entrada = np.array(ultimos_dias[-window_size:]).reshape(1, -1)
+        all_preds = np.stack([tree.predict(entrada) for tree in model.estimators_])
+        media = all_preds.mean()
+        desvio = all_preds.std()
 
-    st.subheader("📊 Predicted vs Actual Close Prices")
+        previsoes.append(media)
+        previsoes_std.append(desvio)
+        ultimos_dias.append(media)
 
+    # Datas futuras
+    datas_futuras = pd.date_range(start=df.index[-1] + pd.Timedelta(days=1), periods=30)
+    df_previsao = pd.DataFrame({
+        'Date': datas_futuras,
+        'Predicted Close': previsoes,
+        'Lower Bound': np.array(previsoes) - np.array(previsoes_std),
+        'Upper Bound': np.array(previsoes) + np.array(previsoes_std),
+    }).set_index('Date')
+
+    # 📊 Gráfico com intervalo de confiança
+    st.subheader("📊 Forecast: Next 30 Days (with confidence intervals)")
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=df.index,
         y=df['Close'],
         mode='lines',
-        name='Actual Close',
+        name='Historical Close',
         line=dict(color='blue')
     ))
     fig.add_trace(go.Scatter(
-        x=df.index,
-        y=df['Predicted Close'],
+        x=df_previsao.index,
+        y=df_previsao['Predicted Close'],
         mode='lines',
         name='Predicted Close',
-        line=dict(color='orange')
+        line=dict(color='orange', dash='dash')
+    ))
+    fig.add_trace(go.Scatter(
+        x=df_previsao.index.tolist() + df_previsao.index[::-1].tolist(),
+        y=(df_previsao['Upper Bound'].tolist() + df_previsao['Lower Bound'][::-1].tolist()),
+        fill='toself',
+        fillcolor='rgba(255,165,0,0.2)',
+        line=dict(color='rgba(255,255,255,0)'),
+        hoverinfo="skip",
+        showlegend=True,
+        name='Confidence Interval'
     ))
 
     fig.update_layout(
-        title="Actual vs Predicted Close Prices",
+        title=f"30-Day Forecast (Window: {window_size} days)",
         xaxis_title="Date",
-        yaxis_title="Price",
-        height=400,
-        margin=dict(t=20, b=40)
+        yaxis_title="Close Price (€)",
+        height=500,
+        margin=dict(t=30, b=40)
     )
 
     st.plotly_chart(fig, use_container_width=True)
 
+    return df_previsao
+
+
+    
+    
+    
 # ---------------------------------------------------------------------
 # Página principal
 st.set_page_config(page_title="Análise de Ativo", layout="wide")
@@ -352,8 +429,7 @@ if btn and ticker:
         mostrar_grafico_tecnico(ticker, dados)
         metricas = calcular_metricas_performance(dados)
         mostrar_metricas_performance(metricas)
-        resultados = treinar_modelo_ml(dados)  # 'dados' deve ter a coluna 'Close'
-        mostrar_resultados_ml(resultados, dados)
+        modelo_ml_prever_futuro(dados)
 
 
 
