@@ -362,151 +362,56 @@ def mostrar_fronteira_heatmap(dados, pesos):
 
 #----------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-
-import numpy as np
-import pandas as pd
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import mean_squared_error
 
-def simular_monte_carlo_ml(dados, n_dias=252, n_simulacoes=500):
-    retornos = dados.pct_change().dropna()
-    simulacoes_por_ativo = {}
+def prever_retorno_linear(dados):
+    # Preparar dados
+    dados['retorno'] = dados['Close'].pct_change().shift(-1)  # Prevendo o retorno futuro
+    dados = dados.dropna()
 
-    for ativo in retornos.columns:
-        df = pd.DataFrame()
-        df['retorno'] = retornos[ativo]
-        df['retorno_1d'] = retornos[ativo].shift(1)
-        df['retorno_5d'] = retornos[ativo].rolling(5).mean().shift(1)
-        df['retorno_21d'] = retornos[ativo].rolling(21).mean().shift(1)
-        df['volatilidade_5d'] = retornos[ativo].rolling(5).std().shift(1)
-        df['volatilidade_21d'] = retornos[ativo].rolling(21).std().shift(1)
-        df = df.dropna()
+    # Definir X e y
+    X = dados[['Open', 'High', 'Low', 'Close', 'Volume']]  # Variáveis de entrada
+    y = dados['retorno']  # Variável alvo (retorno futuro)
 
-        if len(df) < 100:
-            continue
+    # Split de treino e teste
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-        X = df.drop(columns="retorno")
-        y = df["retorno"]
+    # Treinar o modelo
+    model = LinearRegression()
+    model.fit(X_train, y_train)
 
-        scaler = StandardScaler()
-        X_scaled = scaler.fit_transform(X)
+    # Prever e calcular o erro
+    y_pred = model.predict(X_test)
+    mse = mean_squared_error(y_test, y_pred)
 
-        X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
+    return model, mse
 
-        model = RandomForestRegressor(n_estimators=100, random_state=42)
-        model.fit(X_train, y_train)
+from sklearn.ensemble import RandomForestRegressor
 
-        ultimos_dados = X_scaled[-1].reshape(1, -1)
-        simulacoes = []
+def prever_retorno_rf(dados):
+    # Preparar dados
+    dados['retorno'] = dados['Close'].pct_change().shift(-1)
+    dados = dados.dropna()
 
-        for _ in range(n_simulacoes):
-            caminho = []
-            dado_atual = ultimos_dados.copy()
-            for _ in range(n_dias):
-                retorno_simulado = model.predict(dado_atual)[0]
-                caminho.append(retorno_simulado)
+    # Definir X e y
+    X = dados[['Open', 'High', 'Low', 'Close', 'Volume']]
+    y = dados['retorno']
 
-                # atualiza input com novo retorno simulado (simples)
-                novo_input = np.roll(dado_atual[0], -1)
-                novo_input[-1] = retorno_simulado
-                dado_atual = novo_input.reshape(1, -1)
+    # Split de treino e teste
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-            simulacoes.append(caminho)
+    # Treinar o modelo
+    model = RandomForestRegressor(n_estimators=100, random_state=42)
+    model.fit(X_train, y_train)
 
-        simulacoes_por_ativo[ativo] = np.array(simulacoes)
+    # Prever e calcular o erro
+    y_pred = model.predict(X_test)
+    mse = mean_squared_error(y_test, y_pred)
 
-    return simulacoes_por_ativo
+    return model, mse
 
-import streamlit as st
-import plotly.graph_objects as go
-
-def mostrar_simulacoes_monte_carlo(simulacoes_por_ativo):
-    st.subheader("📈 Simulação de Monte Carlo com ML (252 dias)")
-
-    for ativo, simulacoes in simulacoes_por_ativo.items():
-        st.markdown(f"#### 🔮 {ativo} - Simulações de Retorno Acumulado")
-
-        trajetorias = (1 + simulacoes).cumprod(axis=1)
-
-        fig = go.Figure()
-        for traj in trajetorias:
-            fig.add_trace(go.Scatter(y=traj, mode="lines", line=dict(width=1), opacity=0.2, showlegend=False))
-        fig.update_layout(
-            title=f"Simulações - {ativo}",
-            xaxis_title="Dias",
-            yaxis_title="Crescimento acumulado",
-            height=400
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-#----------------------------------------------------------------------------------------------------------------------------------------------------------------------
-
-def simular_monte_carlo_ml(dados, pesos, df_previsoes, dias=252, simulacoes=1000, capital=1000):
-    tickers = list(pesos.keys())
-    retorno_previsto = df_previsoes.set_index("Ativo")["Previsão (%)"].astype(float) / 100
-
-    simulacoes_resultado = []
-
-    for i in range(simulacoes):
-        caminho_ativos = []
-
-        for ticker in tickers:
-            preco_inicial = dados[ticker].dropna().iloc[-1]
-            mu_anual = retorno_previsto.get(ticker, 0.0)
-            mu_diario = mu_anual / dias
-            sigma_diario = dados[ticker].pct_change().std()
-
-            retornos = np.random.normal(loc=mu_diario, scale=sigma_diario, size=dias)
-            precos = preco_inicial * np.cumprod(1 + retornos)
-            caminho_ativos.append(precos)
-
-        matriz_precos = np.array(caminho_ativos)  # shape: (ativos, dias)
-        pesos_array = np.array([pesos[t] for t in tickers])
-        valor_diario = (matriz_precos.T @ pesos_array) * capital
-        simulacoes_resultado.append(valor_diario)
-
-    df_simulacoes = pd.DataFrame(simulacoes_resultado).T
-    df_simulacoes.index.name = "Dias"
-
-    return df_simulacoes
-
-import streamlit as st
-import plotly.express as px
-
-def mostrar_simulacao_monte_carlo_interativa(dados, pesos_ml, df_previsoes):
-    st.subheader("🧪 Simulação Monte Carlo com Machine Learning")
-
-    with st.expander("⚙️ Parâmetros da Simulação"):
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            capital = st.number_input("Capital Inicial (€)", min_value=1000, value=10000, step=1000)
-        with col2:
-            anos = st.slider("Horizonte (anos)", min_value=1, max_value=10, value=1)
-        with col3:
-            simulacoes = st.slider("Nº de Simulações", min_value=100, max_value=2000, value=500, step=100)
-
-    if st.button("▶️ Executar Simulação"):
-        dias = anos * 252
-        df_simulacoes = simular_monte_carlo_ml(dados, pesos_ml, df_previsoes, dias=dias, simulacoes=simulacoes, capital=capital)
-
-        st.markdown(f"### 📉 Projeção da Carteira para {anos} ano(s) com {simulacoes} simulações")
-        fig = px.line(
-            df_simulacoes,
-            title="📈 Evolução da Carteira com Monte Carlo + ML",
-            labels={"value": "Valor da Carteira (€)", "Dias": "Dias"},
-            height=500
-        )
-        fig.update_layout(showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
-
-        resultado_final = df_simulacoes.iloc[-1]
-        st.markdown("### 📊 Estatísticas Finais")
-        st.write({
-            "Valor Mínimo (€)": f"{resultado_final.min():,.2f}",
-            "Valor Médio (€)": f"{resultado_final.mean():,.2f}",
-            "Valor Máximo (€)": f"{resultado_final.max():,.2f}"
-        })
 
 
 
@@ -560,13 +465,19 @@ if btn and selecionados:
     mostrar_performance(dados, pesos)
     mostrar_fronteira_heatmap(dados, pesos)
     mostrar_benchmark_simples(dados, pesos, benchmark_ticker=benchmark_ticker, anos=anos)
+    st.write(dados.columns)  # Isso vai listar todas as colunas do DataFrame
 
 
-    simulacoes = simular_monte_carlo_ml(dados, n_simulacoes=10)
-    mostrar_simulacoes_monte_carlo(simulacoes)
-    pesos_ml, df_previsoes, _ = otimizar_carteira_com_ml(dados)
-    mostrar_simulacao_monte_carlo_interativa(dados, pesos_ml, df_previsoes)
+    # Obtenção dos dados e previsão
+    dados = obter_dados(selecionados, data_inicio, data_fim)
+    modelo, mse = prever_retorno_rf(dados)
 
+    # Exibir MSE como feedback
+    st.write(f"Erro quadrático médio (MSE): {mse:.4f}")
+
+    # Gráfico da previsão de retornos
+    st.subheader("Previsão de Retornos Futuros")
+    st.write(modelo)
 
     st.write("Prévia dos dados carregados:")
     st.dataframe(dados.head())

@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
+import plotly.express as px
 
 # --- Função para carregar e limpar a tábua ---
 def carregar_tabela_mortalidade(caminho_arquivo: str, aba: str = "Estimates 2016-2023") -> pd.DataFrame:
@@ -57,44 +58,76 @@ def calcular_reserva(df_mortalidade, local, idade_atual, idade_apos, renda_mensa
 
 # --- Função de visualização ---
 def mostrar_resultado(res, idade_atual, idade_apos, taxa_juros):
-    st.markdown("### 📌 Estatísticas da Região")
+    st.markdown(f"### 📌 Region Statistics - {regiao}")
     col4, col5, col6 = st.columns(3)
-    idade_mais_sobreviventes = df_regiao.loc[df_regiao['idade'] != 0, :].sort_values(by='lx', ascending=False).iloc[0]['idade']
-    col4.metric("Idade com mais sobreviventes", f"{int(idade_mais_sobreviventes)}")
-    col5.metric("Expectativa de vida ao nascer", f"{df_regiao.loc[df_regiao['idade'] == 0, 'ex'].values[0]:.1f} anos")
-    prob_sobrevivencia_65 = df_regiao.loc[df_regiao['idade'] == 65, 'lx'].values[0] / df_regiao.loc[df_regiao['idade'] == 0, 'lx'].values[0] * 100
-    col6.metric("Sobrevivência aos 65 anos", f"{prob_sobrevivencia_65:.1f}%")
+    
+    # Substitui "idade com mais sobreviventes" por "idade onde idade e expectativa de vida se cruzam"
+    df_regiao['diff'] = (df_regiao['idade'] - df_regiao['ex']).abs()
+    idade_ex_proximos = df_regiao.loc[df_regiao['diff'].idxmin(), 'idade']
+    col4.metric("Age ≈ Expected Remaining Years", f"{int(idade_ex_proximos)}")
 
-    st.subheader(f"📊 Simulação com Gráficos - {regiao}")
+    col5.metric("Life Expectancy", f"{df_regiao.loc[df_regiao['idade'] == 0, 'ex'].values[0]:.1f} years")
+
+    # Calcular probabilidade de sobreviver até a idade da aposentadoria
+    prob_sobrevivencia_apos = (
+        df_regiao.loc[df_regiao['idade'] == idade_apos, 'lx'].values[0] /
+        df_regiao.loc[df_regiao['idade'] == idade_atual, 'lx'].values[0] * 100
+    )
+
+    col6.metric(
+    f"Probability of surviving from {idade_atual} to {idade_apos} years",
+        f"{prob_sobrevivencia_apos:.1f}%"
+    )
+
+    st.subheader(f"📊 Simulation with Charts - {regiao}")
     col_g1, col_g2 = st.columns([2, 1])
     with col_g1:
-        st.markdown("**📈 Expectativa de Vida - Linha**")
-        df_plot = df_regiao[['idade', 'ex']].set_index('idade')
-        st.line_chart(df_plot)
+        st.markdown("**📈 Life Expectancy**")
+        df_plot = df_regiao[['idade', 'ex']].rename(columns={
+            'idade': 'Age',
+            'ex': 'Life Expectancy'
+        })
+        fig1 = px.line(
+        df_plot,
+        x="Age",
+        y="Life Expectancy",
+        labels={"Age": "Age", "Life Expectancy": "Expected Remaining Years"}
+    )
+        st.plotly_chart(fig1, use_container_width=True)
 
     with col_g2:
-        st.markdown("**🏛️ Pirâmide Etária de Sobrevivência**")
-        df_piramide = df_regiao[['idade', 'lx']].copy()
-        df_piramide['lx'] = df_piramide['lx'] / 1000
-        st.bar_chart(df_piramide.set_index('idade'))
+        st.markdown("**🏛️ Age Pyramid of Survival**")
+        df_piramide = df_regiao[['idade', 'lx']].rename(columns={
+        'idade': 'Age',
+        'lx': 'Survivors'
+        })
+        df_piramide['Survivors (thousands)'] = df_piramide['Survivors'] / 1000
+        fig2 = px.bar(
+        df_piramide,
+        x="Age",
+        y="Survivors (thousands)",
+        orientation="v",
+        labels={"Age": "Age", "Survivors (thousands)": "Survivors (thousands)"}
+    )
+        st.plotly_chart(fig2, use_container_width=True)
 
-    st.markdown("### 🧮 Resultados da Simulação")
+    st.markdown("### 🧮 Simulation Results")
     col1, col2, col3 = st.columns(3)
-    col1.metric("Reserva HOJE (€)", f"{res['reserva_hoje']:,.2f}")
-    col2.metric("Reserva NA APOSENTADORIA (€)", f"{res['reserva_aposentadoria']:,.2f}")
-    col3.metric("Expectativa de vida aos {idade_apos}", f"{res['expectativa_vida']:.1f} anos")
+    col1.metric("Current Reserve", f"{res['reserva_hoje']:,.2f}")
+    col2.metric("Retirement Reserve", f"{res['reserva_aposentadoria']:,.2f}")
+    col3.metric(f"Life Expectancy at {idade_apos}", f"{res['expectativa_vida']:.1f} years")
 
-    st.markdown("### 📉 Evolução da Reserva Até a Aposentadoria")
+    st.markdown("### 📉 Evolution of Reserve Until Retirement")
     anos_ate_apos = idade_apos - idade_atual
     idades = list(range(idade_atual, idade_apos + 1))
     valores_ano_a_ano = [
         res['reserva_aposentadoria'] / ((1 + taxa_juros) ** (anos_ate_apos - t))
         for t in range(anos_ate_apos + 1)
     ]
-    df_reserva = pd.DataFrame({"Idade": idades, "Reserva acumulada (€)": valores_ano_a_ano}).set_index("Idade")
+    df_reserva = pd.DataFrame({"Age": idades, "Accumulated Reserve": valores_ano_a_ano}).set_index("Age")
     st.bar_chart(df_reserva)
 
-    st.markdown("### 📉 Evolução do Capital Pós-Aposentadoria")
+    st.markdown("### 📉 Evolution of Capital After Retirement")
     idades_apos = list(range(idade_apos, idade_apos + res['anos_de_renda']))
     capital_com_juros = [res['reserva_aposentadoria']]
     capital_sem_juros = [res['reserva_aposentadoria']]
@@ -106,8 +139,8 @@ def mostrar_resultado(res, idade_atual, idade_apos, taxa_juros):
 
     df_apos = pd.DataFrame({
         "Idade": idades_apos,
-        "Com Juros (€)": capital_com_juros,
-        "Sem Juros (€)": capital_sem_juros
+        "with Interest": capital_com_juros,
+        "Without Interest": capital_sem_juros
     }).set_index("Idade")
     st.line_chart(df_apos)
 
