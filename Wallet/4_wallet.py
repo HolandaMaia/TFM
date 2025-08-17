@@ -200,50 +200,51 @@ def plot_combined_chart(df, symbol, sma_values=None, macd=None, signal=None):
     return fig
 
 def mostrar_graficos_ativos(pesos, anos, frequencia):
-    st.subheader("📊 Análise Técnica por Ativo")
+    with st.expander(f"📊 Technical Analysis by Asset"):
+        st.subheader("📊 Technical Analysis by Asset")
 
-    # Define datas com base no parâmetro "anos"
-    data_fim = pd.Timestamp.today()
-    data_inicio = data_fim - pd.DateOffset(years=anos)
+        # Definir fechas
+        fecha_fin = pd.Timestamp.today()
+        fecha_inicio = fecha_fin - pd.DateOffset(years=anos)
 
-    # Baixa os dados OHLC completos apenas para os tickers da carteira
-    tickers = list(pesos.index)
-    dados_ohlc = yf.download(
-        tickers,
-        start=data_inicio,
-        end=data_fim,
-        interval=frequencia,
-        auto_adjust=False,
-        group_by='ticker'
-    )
+        # Descargar datos OHLC
+        tickers = list(pesos.index)
+        datos_ohlc = yf.download(
+            tickers,
+            start=fecha_inicio,
+            end=fecha_fin,
+            interval=frequencia,
+            auto_adjust=False,
+            group_by='ticker'
+        )
 
-    for ticker in tickers:
-        if ticker not in dados_ohlc.columns.levels[0]:
-            st.warning(f"❗ Dados não disponíveis para {ticker}")
-            continue
+        for ticker in tickers:
+            if ticker not in datos_ohlc.columns.levels[0]:
+                st.warning(f"❗ Datos no disponibles para {ticker}")
+                continue
 
-        df = dados_ohlc[ticker].dropna().copy()
-        df = df.rename(columns=str.lower)
-        df['date'] = df.index
+            df = datos_ohlc[ticker].dropna().copy()
+            df = df.rename(columns=str.lower)
+            df['date'] = df.index
 
-        if df.empty or df[['open', 'high', 'low', 'close']].isna().all().any():
-            st.warning(f"❗ Dados incompletos para {ticker}")
-            continue
+            if df.empty or df[['open', 'high', 'low', 'close']].isna().all().any():
+                st.warning(f"❗ Datos incompletos para {ticker}")
+                continue
 
-        # Calcular indicadores
-        sma_values = {
-            20: df['close'].rolling(window=20).mean(),
-            50: df['close'].rolling(window=50).mean()
-        }
+            # Indicadores
+            sma_values = {
+                20: df['close'].rolling(window=20).mean(),
+                50: df['close'].rolling(window=50).mean()
+            }
+            ema12 = df['close'].ewm(span=12, adjust=False).mean()
+            ema26 = df['close'].ewm(span=26, adjust=False).mean()
+            macd = ema12 - ema26
+            signal = macd.ewm(span=9, adjust=False).mean()
 
-        ema12 = df['close'].ewm(span=12, adjust=False).mean()
-        ema26 = df['close'].ewm(span=26, adjust=False).mean()
-        macd = ema12 - ema26
-        signal = macd.ewm(span=9, adjust=False).mean()
+            # Gráfico
+            fig = plot_combined_chart(df, ticker, sma_values=sma_values, macd=macd, signal=signal)
+            st.plotly_chart(fig, use_container_width=True)
 
-        # Plota gráfico técnico
-        fig = plot_combined_chart(df, ticker, sma_values=sma_values, macd=macd, signal=signal)
-        st.plotly_chart(fig, use_container_width=True)
         
 #----------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -362,55 +363,194 @@ def mostrar_fronteira_heatmap(dados, pesos):
 
 #----------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-from sklearn.linear_model import LinearRegression
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error
+# --- Monte Carlo da carteira: cálculo (corrigido para passo diário) ---
+import numpy as np
+import pandas as pd
 
-def prever_retorno_linear(dados):
-    # Preparar dados
-    dados['retorno'] = dados['Close'].pct_change().shift(-1)  # Prevendo o retorno futuro
-    dados = dados.dropna()
+def simular_monte_carlo_carteira(
+    dados_close: pd.DataFrame,
+    pesos: pd.Series,
+    capital_inicial: float = 1000.0,
+    n_anos: int = 10,
+    simulacoes: int = 5000,
+    passos_por_ano: int = 252,
+    usar_bootstrap: bool = False,
+    seed: int | None = 42,
+    debug: bool = False
+):
+    """
+    Simula o valor da carteira via Monte Carlo a partir dos retornos históricos da CARTEIRA.
+    Estima μ_d e σ_d em base diária (log-retornos) e usa PASSO DIÁRIO (dt=1).
+    """
+    # 1) Alinhar colunas/pesos e normalizar
+    cols = [c for c in dados_close.columns if c in pesos.index]
+    if not cols:
+        raise ValueError("Não há interseção entre colunas de dados e índices de pesos.")
+    dados_close = dados_close[cols].ffill().dropna()
+    pesos = pesos.loc[cols]
+    pesos = pesos / pesos.sum()
 
-    # Definir X e y
-    X = dados[['Open', 'High', 'Low', 'Close', 'Volume']]  # Variáveis de entrada
-    y = dados['retorno']  # Variável alvo (retorno futuro)
+    # 2) Retornos da carteira
+    ret_ativos = dados_close.pct_change().dropna()
+    ret_carteira = (ret_ativos @ pesos).dropna()
 
-    # Split de treino e teste
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    # 3) Parâmetros diários (log-retornos)
+    log_ret = np.log1p(ret_carteira)
+    mu_d = float(log_ret.mean())                 # média diária
+    sigma_d = float(log_ret.std(ddof=1))         # desvio diário
 
-    # Treinar o modelo
-    model = LinearRegression()
-    model.fit(X_train, y_train)
+    if debug:
+        # Diagnóstico para comparar com teus KPIs
+        mu_a = (np.exp(mu_d) - 1) * passos_por_ano      # aprox. anual simples a partir de log-mean
+        vol_a = sigma_d * np.sqrt(passos_por_ano)
+        # Sharpe “histórico” aproximado (sem RF)
+        sharpe_a = mu_a / vol_a if vol_a > 0 else np.nan
+        import streamlit as st
+        st.write({
+            "mu_log_diario": mu_d,
+            "sigma_log_diario": sigma_d,
+            "retorno_anual_aprox(%)": mu_a * 100,
+            "vol_anual(%)": vol_a * 100,
+            "sharpe_aprox": sharpe_a
+        })
 
-    # Prever e calcular o erro
-    y_pred = model.predict(X_test)
-    mse = mean_squared_error(y_test, y_pred)
+    # 4) Simulação com passo diário (dt = 1 dia)
+    n_passos = int(n_anos * passos_por_ano)
+    rng = np.random.default_rng(seed)
 
-    return model, mse
+    if usar_bootstrap:
+        hist = ret_carteira.values
+        idx = rng.integers(0, len(hist), size=(n_passos, simulacoes))
+        fatores = 1.0 + hist[idx]  # retorno simples reamostrado por dia
+    else:
+        # GBM diário: S_{t+1} = S_t * exp((μ_d - 0.5σ_d^2) + σ_d * Z_t)
+        Z = rng.standard_normal(size=(n_passos, simulacoes))
+        fatores = np.exp((mu_d - 0.5 * sigma_d**2) + sigma_d * Z)
 
-from sklearn.ensemble import RandomForestRegressor
+    # 5) Trajetórias
+    niveis = np.vstack([np.ones((1, simulacoes)), fatores]).cumprod(axis=0)
+    valores = capital_inicial * niveis  # shape = (tempo, simulações)
 
-def prever_retorno_rf(dados):
-    # Preparar dados
-    dados['retorno'] = dados['Close'].pct_change().shift(-1)
-    dados = dados.dropna()
+    # 6) Percentis ao longo do tempo
+    pcts = np.percentile(valores, [5, 25, 50, 75, 95], axis=1)
+    t_anos = np.arange(valores.shape[0]) / passos_por_ano
+    percentiles_df = pd.DataFrame({
+        "years": t_anos,
+        "p05": pcts[0], "p25": pcts[1], "p50": pcts[2], "p75": pcts[3], "p95": pcts[4]
+    })
 
-    # Definir X e y
-    X = dados[['Open', 'High', 'Low', 'Close', 'Volume']]
-    y = dados['retorno']
+    # 7) Distribuição terminal e CAGR
+    vt = valores[-1, :]
+    cagr = (vt / capital_inicial) ** (1.0 / n_anos) - 1.0
 
-    # Split de treino e teste
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    # 8) Métricas
+    var5 = np.percentile(vt - capital_inicial, 5)
+    es5 = (vt - capital_inicial)[(vt - capital_inicial) <= var5].mean()
+    resumo = {
+        "mu_log_diario": mu_d,
+        "sigma_log_diario": sigma_d,
+        "mediana_final": float(np.median(vt)),
+        "p5_final": float(np.percentile(vt, 5)),
+        "p95_final": float(np.percentile(vt, 95)),
+        "prob_perda": float(np.mean(vt < capital_inicial)),
+        "var5_eur_10y": float(var5),
+        "es5_eur_10y": float(es5) if not np.isnan(es5) else None,
+        "cagr_mediana": float(np.median(cagr)),
+        "cagr_p5": float(np.percentile(cagr, 5)),
+        "cagr_p95": float(np.percentile(cagr, 95)),
+        "capital_inicial": float(capital_inicial),
+        "n_anos": int(n_anos),
+    }
 
-    # Treinar o modelo
-    model = RandomForestRegressor(n_estimators=100, random_state=42)
-    model.fit(X_train, y_train)
+    return {
+        "percentiles_df": percentiles_df,
+        "valores_terminais": vt,
+        "cagr_sim": cagr,
+        "resumo": resumo,
+    }
 
-    # Prever e calcular o erro
-    y_pred = model.predict(X_test)
-    mse = mean_squared_error(y_test, y_pred)
 
-    return model, mse
+
+def mostrar_simulacao_carteira(resultado_mc: dict, titulo: str = "🔮 Monte Carlo Simulation (10 years)"):
+    """
+    Mostra:
+      - KPIs (median, P5, P95, prob. loss, CAGR quantis)
+      - Fan chart (P5–P95) do valor simulado
+      - PDF do CAGR
+      - Histograma e CDF do retorno final
+    Labels em inglês; textos em PT-BR.
+    """
+    p = resultado_mc["percentiles_df"]
+    vt = resultado_mc["valores_terminais"]
+    cagr = resultado_mc["cagr_sim"]
+    r = resultado_mc["resumo"]
+
+    with st.expander(titulo, expanded=True):
+        # KPIs
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Median terminal (€)", f"{r['mediana_final']:,.0f}")
+        c2.metric("P5 terminal (€)", f"{r['p5_final']:,.0f}")
+        c3.metric("P95 terminal (€)", f"{r['p95_final']:,.0f}")
+        c4.metric("Loss probability", f"{100*r['prob_perda']:.1f}%")
+
+        c5, c6, c7 = st.columns(3)
+        c5.metric("Median CAGR", f"{100*r['cagr_mediana']:.2f}%")
+        c6.metric("CAGR P5", f"{100*r['cagr_p5']:.2f}%")
+        c7.metric("CAGR P95", f"{100*r['cagr_p95']:.2f}%")
+
+        # Fan chart
+        fig_fan = go.Figure()
+        fig_fan.add_trace(go.Scatter(x=p["years"], y=p["p50"], mode="lines", name="Median"))
+        fig_fan.add_trace(go.Scatter(x=p["years"], y=p["p25"], mode="lines", name="P25", line=dict(dash="dash")))
+        fig_fan.add_trace(go.Scatter(x=p["years"], y=p["p75"], mode="lines", name="P75", line=dict(dash="dash")))
+        fig_fan.add_trace(go.Scatter(
+            x=np.concatenate([p["years"].values, p["years"].values[::-1]]),
+            y=np.concatenate([p["p95"].values, p["p05"].values[::-1]]),
+            fill="toself", name="P5–P95", mode="lines", line=dict(width=0), opacity=0.3
+        ))
+        fig_fan.update_layout(
+            title="Projected portfolio value (fan chart)",
+            xaxis_title="Years", yaxis_title="Value (€)", hovermode="x unified"
+        )
+        st.plotly_chart(fig_fan, use_container_width=True)
+
+        # PDF do CAGR
+        hist_vals, bins = np.histogram(cagr, bins=60, density=True)
+        xmid = (bins[:-1] + bins[1:]) / 2.0
+        fig_pdf = go.Figure()
+        fig_pdf.add_trace(go.Bar(x=xmid, y=hist_vals, opacity=0.7, name="Density"))
+        fig_pdf.update_layout(
+            title="CAGR distribution (annualized)",
+            xaxis_title="CAGR", yaxis_title="Density"
+        )
+        st.plotly_chart(fig_pdf, use_container_width=True)
+
+        # Histograma do retorno final
+        ret_final = vt / r["capital_inicial"] - 1.0
+        h2, b2 = np.histogram(ret_final, bins=60, density=True)
+        x2 = (b2[:-1] + b2[1:]) / 2.0
+        fig_hist = go.Figure()
+        fig_hist.add_trace(go.Bar(x=x2, y=h2, opacity=0.7, name="Density"))
+        fig_hist.update_layout(
+            title="Terminal return distribution (V_T / V_0 − 1)",
+            xaxis_title="Terminal return", yaxis_title="Density"
+        )
+        st.plotly_chart(fig_hist, use_container_width=True)
+
+        # CDF empírica
+        orden = np.sort(ret_final)
+        cdf = np.linspace(0, 1, len(orden))
+        fig_cdf = go.Figure()
+        fig_cdf.add_trace(go.Scatter(x=orden, y=cdf, mode="lines", name="CDF"))
+        fig_cdf.update_layout(
+            title="Cumulative distribution (terminal return)",
+            xaxis_title="Terminal return", yaxis_title="Cumulative prob."
+        )
+        st.plotly_chart(fig_cdf, use_container_width=True)
+
+        st.caption("Notas: parâmetros estimados dos log-retornos diários da carteira. "
+                   "Ative 'usar_bootstrap=True' para preservar caudas da distribuição histórica.")
+
 
 
 
@@ -468,9 +608,24 @@ if btn and selecionados:
     st.write(dados.columns)  # Isso vai listar todas as colunas do DataFrame
 
 
-    # Obtenção dos dados e previsão
-    dados = obter_dados(selecionados, data_inicio, data_fim)
-    modelo, mse = prever_retorno_rf(dados)
+    # --- Monte Carlo: cálculo sobre a CARTEIRA (usa apenas Close + pesos) ---
+    try:
+        resultado_mc = simular_monte_carlo_carteira(
+            dados_close=dados,            # 'dados' aqui já é ONLY Close por ticker (tua obter_dados)
+            pesos=pesos,
+            capital_inicial=1_000.0,     # ajusta se quiseres
+            n_anos=anos,                  # usa o slider já escolhido
+            simulacoes=10_000,
+            passos_por_ano=252,
+            usar_bootstrap=False,
+            seed=42
+        )
+        # --- Monte Carlo: visualização (em expander, sem botão) ---
+        mostrar_simulacao_carteira(resultado_mc, titulo="🔮 Monte Carlo Simulation (10 years)")
+    except Exception as e:
+        st.error(f"Erro na simulação de Monte Carlo: {e}")
+
+    
 
     # Exibir MSE como feedback
     st.write(f"Erro quadrático médio (MSE): {mse:.4f}")

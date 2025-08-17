@@ -124,8 +124,22 @@ def mostrar_resultado(res, idade_atual, idade_apos, taxa_juros):
         res['reserva_aposentadoria'] / ((1 + taxa_juros) ** (anos_ate_apos - t))
         for t in range(anos_ate_apos + 1)
     ]
-    df_reserva = pd.DataFrame({"Age": idades, "Accumulated Reserve": valores_ano_a_ano}).set_index("Age")
-    st.bar_chart(df_reserva)
+    df_reserva = pd.DataFrame({"Age": idades, "Accumulated Reserve": valores_ano_a_ano})
+    # Gráfico com labels em inglês
+    fig_reserva = px.bar(
+        df_reserva,
+        x="Age",
+        y="Accumulated Reserve",
+        labels={
+            "Age": "Age (years)",
+            "Accumulated Reserve": "Reserve"
+        },
+        title="Evolution of Reserve Until Retirement"
+    )
+
+    # Eixo Y em formato monetário
+    fig_reserva.update_yaxes(separatethousands=True)
+    st.plotly_chart(fig_reserva, use_container_width=True)
 
     st.markdown("### 📉 Evolution of Capital After Retirement")
     idades_apos = list(range(idade_apos, idade_apos + res['anos_de_renda']))
@@ -141,12 +155,24 @@ def mostrar_resultado(res, idade_atual, idade_apos, taxa_juros):
         "Idade": idades_apos,
         "with Interest": capital_com_juros,
         "Without Interest": capital_sem_juros
-    }).set_index("Idade")
-    st.line_chart(df_apos)
+    })
+    fig_apos = px.line(
+        df_apos,
+        x="Idade",
+        y=["with Interest", "Without Interest"],
+        labels={
+            "Idade": "Age",
+            "value": "Capital",
+            "variable": "Scenario"            
+        },
+        title="Evolution of Capital After Retirement"
+    )
+    fig_apos.update_yaxes(separatethousands=True)
+    st.plotly_chart(fig_apos, use_container_width=True)
 
 # --- Interface principal ---
 st.set_page_config(page_title="Calculadora Atuarial", layout="wide")
-st.title("🧮 Calculadora Atuarial de Reserva para Aposentadoria")
+st.title("🧮 Actuarial Retirement Reserve Calculator")
 
 @st.cache_resource
 def carregar_dados():
