@@ -194,6 +194,16 @@ if st.sidebar.button("Calcular Reserva"):
     res = calcular_reserva(df_mortalidade, regiao, idade_atual, idade_apos, renda_mensal, taxa_juros)
     df_regiao = df_mortalidade[df_mortalidade['local'] == regiao].sort_values(by='idade')
     if res:
+        # Salvar no session_state para usar em outras páginas
+        st.session_state["actuarial_result"] = res
+        st.session_state["user_inputs"] = {
+            "regiao": regiao,
+            "idade_atual": idade_atual,
+            "idade_apos": idade_apos,
+            "renda_mensal": renda_mensal,
+            "taxa_juros": taxa_juros,
+        }
+
         mostrar_resultado(res, idade_atual, idade_apos, taxa_juros)
     else:
         st.warning("Não foi possível encontrar a idade na tábua de mortalidade.")

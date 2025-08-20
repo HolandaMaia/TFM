@@ -367,6 +367,35 @@ def mostrar_fronteira_heatmap(dados, pesos):
 import numpy as np
 import pandas as pd
 
+# --- Lê parâmetros da calculadora atuarial (se existirem) ---
+def obter_objetivo_atuarial():
+    """
+    Retorna (n_anos, objetivo_reserva, info).
+    Se não houver dados atuariais, usa n_anos=10 e objetivo_reserva=None.
+    """
+    n_anos = 10
+    objetivo_reserva = None
+    info = {"tem_atuarial": False}
+
+    if "actuarial_result" in st.session_state and "user_inputs" in st.session_state:
+        res = st.session_state["actuarial_result"]
+        ui = st.session_state["user_inputs"]
+        objetivo_reserva = float(res.get("reserva_aposentadoria", None))
+        idade_atual = int(ui.get("idade_atual"))
+        idade_apos = int(ui.get("idade_apos"))
+        n_anos = max(1, idade_apos - idade_atual)
+        info.update({
+            "tem_atuarial": True,
+            "regiao": ui.get("regiao"),
+            "idade_atual": idade_atual,
+            "idade_apos": idade_apos,
+            "renda_mensal": float(ui.get("renda_mensal", 0.0)),
+            "taxa_juros": float(ui.get("taxa_juros", 0.0)),
+        })
+    return n_anos, objetivo_reserva, info
+
+
+
 def simular_monte_carlo_carteira(
     dados_close: pd.DataFrame,
     pesos: pd.Series,
@@ -427,6 +456,8 @@ def simular_monte_carlo_carteira(
         Z = rng.standard_normal(size=(n_passos, simulacoes))
         fatores = np.exp((mu_d - 0.5 * sigma_d**2) + sigma_d * Z)
 
+    fatores_diarios = fatores
+      
     # 5) Trajetórias
     niveis = np.vstack([np.ones((1, simulacoes)), fatores]).cumprod(axis=0)
     valores = capital_inicial * niveis  # shape = (tempo, simulações)
@@ -439,7 +470,12 @@ def simular_monte_carlo_carteira(
         "p05": pcts[0], "p25": pcts[1], "p50": pcts[2], "p75": pcts[3], "p95": pcts[4]
     })
 
-    # 7) Distribuição terminal e CAGR
+    # 7) Fatores anuais (para cálculo de aportes)
+    total_completo = n_anos * passos_por_ano
+    fd = fatores_diarios[:total_completo, :]
+    fatores_anuais = fd.reshape(n_anos, passos_por_ano, simulacoes).prod(axis=1)
+
+    # 8) Distribuição terminal e CAGR
     vt = valores[-1, :]
     cagr = (vt / capital_inicial) ** (1.0 / n_anos) - 1.0
 
@@ -467,38 +503,78 @@ def simular_monte_carlo_carteira(
         "valores_terminais": vt,
         "cagr_sim": cagr,
         "resumo": resumo,
+        "fatores_anuais": fatores_anuais,
     }
 
+# --- Cálculo do aporte anual necessário ---
+def calcular_aporte_anual(fatores_anuais: np.ndarray, V0: float, FV_objetivo: float) -> np.ndarray:
+    """
+    Fórmula de valor futuro com aportes no final de cada ano:
+    FV = V0*ΠG + A * Σ Π(G_{t+1..N})
+    => A = (FV_objetivo - V0*ΠG) / S
+    """
+    N, sims = fatores_anuais.shape
+    prod_total = fatores_anuais.prod(axis=0)
+
+    suf_prod = np.ones((N + 1, sims))
+    for k in range(N - 1, -1, -1):
+        suf_prod[k, :] = suf_prod[k + 1, :] * fatores_anuais[k, :]
+    S = np.sum(suf_prod[1:, :], axis=0)
+
+    numerador = FV_objetivo - V0 * prod_total
+    S_seguro = np.where(S <= 1e-12, np.nan, S)
+    A = numerador / S_seguro
+    A = np.where(np.isnan(A), np.nan, np.maximum(0.0, A))
+    return A
 
 
-def mostrar_simulacao_carteira(resultado_mc: dict, titulo: str = "🔮 Monte Carlo Simulation (10 years)"):
+def mostrar_simulacao_carteira(
+    resultado_mc: dict,
+    titulo: str = None,
+    objetivo_reserva: float | None = None
+):
     """
     Mostra:
       - KPIs (median, P5, P95, prob. loss, CAGR quantis)
       - Fan chart (P5–P95) do valor simulado
       - PDF do CAGR
       - Histograma e CDF do retorno final
+      - (Opcional) Distribuição do aporte anual necessário (se objetivo_reserva for passado)
     Labels em inglês; textos em PT-BR.
     """
+    import numpy as np
+    import plotly.graph_objects as go
+    import streamlit as st
+
+    # 1) Extrair dados da simulação
     p = resultado_mc["percentiles_df"]
     vt = resultado_mc["valores_terminais"]
     cagr = resultado_mc["cagr_sim"]
     r = resultado_mc["resumo"]
+    fatores_anuais = resultado_mc.get("fatores_anuais", None)
+
+    n_anos = int(r.get("n_anos", 10))
+    capital_inicial = float(r.get("capital_inicial", 1000.0))
+
+    # 2) Título dinâmico
+    if not titulo:
+        titulo = f"🔮 Monte Carlo Simulation ({n_anos} years)"
 
     with st.expander(titulo, expanded=True):
-        # KPIs
+
+        # 3) KPIs principais
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Median terminal (€)", f"{r['mediana_final']:,.0f}")
-        c2.metric("P5 terminal (€)", f"{r['p5_final']:,.0f}")
-        c3.metric("P95 terminal (€)", f"{r['p95_final']:,.0f}")
-        c4.metric("Loss probability", f"{100*r['prob_perda']:.1f}%")
+        c2.metric("P5 terminal (€)",     f"{r['p5_final']:,.0f}")
+        c3.metric("P95 terminal (€)",    f"{r['p95_final']:,.0f}")
+        c4.metric("Loss probability",     f"{100*r['prob_perda']:.1f}%")
 
         c5, c6, c7 = st.columns(3)
         c5.metric("Median CAGR", f"{100*r['cagr_mediana']:.2f}%")
-        c6.metric("CAGR P5", f"{100*r['cagr_p5']:.2f}%")
-        c7.metric("CAGR P95", f"{100*r['cagr_p95']:.2f}%")
+        c6.metric("CAGR P5",     f"{100*r['cagr_p5']:.2f}%")
+        c7.metric("CAGR P95",    f"{100*r['cagr_p95']:.2f}%")
 
-        # Fan chart
+        # 4) Fan chart
         fig_fan = go.Figure()
         fig_fan.add_trace(go.Scatter(x=p["years"], y=p["p50"], mode="lines", name="Median"))
         fig_fan.add_trace(go.Scatter(x=p["years"], y=p["p25"], mode="lines", name="P25", line=dict(dash="dash")))
@@ -514,7 +590,7 @@ def mostrar_simulacao_carteira(resultado_mc: dict, titulo: str = "🔮 Monte Car
         )
         st.plotly_chart(fig_fan, use_container_width=True)
 
-        # PDF do CAGR
+        # 5) PDF do CAGR
         hist_vals, bins = np.histogram(cagr, bins=60, density=True)
         xmid = (bins[:-1] + bins[1:]) / 2.0
         fig_pdf = go.Figure()
@@ -525,8 +601,8 @@ def mostrar_simulacao_carteira(resultado_mc: dict, titulo: str = "🔮 Monte Car
         )
         st.plotly_chart(fig_pdf, use_container_width=True)
 
-        # Histograma do retorno final
-        ret_final = vt / r["capital_inicial"] - 1.0
+        # 6) Histograma do retorno terminal
+        ret_final = vt / capital_inicial - 1.0
         h2, b2 = np.histogram(ret_final, bins=60, density=True)
         x2 = (b2[:-1] + b2[1:]) / 2.0
         fig_hist = go.Figure()
@@ -537,7 +613,7 @@ def mostrar_simulacao_carteira(resultado_mc: dict, titulo: str = "🔮 Monte Car
         )
         st.plotly_chart(fig_hist, use_container_width=True)
 
-        # CDF empírica
+        # 7) CDF empírica
         orden = np.sort(ret_final)
         cdf = np.linspace(0, 1, len(orden))
         fig_cdf = go.Figure()
@@ -548,8 +624,87 @@ def mostrar_simulacao_carteira(resultado_mc: dict, titulo: str = "🔮 Monte Car
         )
         st.plotly_chart(fig_cdf, use_container_width=True)
 
-        st.caption("Notas: parâmetros estimados dos log-retornos diários da carteira. "
-                   "Ative 'usar_bootstrap=True' para preservar caudas da distribuição histórica.")
+        # 8) (Opcional) Aporte anual necessário se houver objetivo
+        if objetivo_reserva is not None and np.isfinite(objetivo_reserva) and fatores_anuais is not None:
+            # 8.1) Calcular distribuição de A
+            A_vect = calcular_aporte_anual(
+                fatores_anuais=fatores_anuais,
+                V0=capital_inicial,
+                FV_objetivo=float(objetivo_reserva)
+            )
+            A_valid = A_vect[np.isfinite(A_vect)]
+
+            st.markdown("### 💶 Required Annual Contribution")
+            if A_valid.size > 0:
+                A_mediana = float(np.median(A_valid))
+                A_p5      = float(np.percentile(A_valid, 5))
+                A_p95     = float(np.percentile(A_valid, 95))
+
+                d1, d2, d3, d4 = st.columns(4)
+                d1.metric("Annual Contribution (Median)", f"{A_mediana:,.2f} €")
+                d2.metric("Annual Contribution (P5)",     f"{A_p5:,.2f} €")
+                d3.metric("Annual Contribution (P95)",    f"{A_p95:,.2f} €")
+                d4.metric("Horizon",                      f"{n_anos} years")
+
+                # 8.2) Histograma de A
+                ha, ba = np.histogram(A_valid, bins=50, density=True)
+                xa = (ba[:-1] + ba[1:]) / 2.0
+                fig_A = go.Figure()
+                fig_A.add_trace(go.Bar(x=xa, y=ha, opacity=0.7, name="Density"))
+                fig_A.update_layout(
+                    title="Required annual contribution (distribution)",
+                    xaxis_title="Annual contribution (€)", yaxis_title="Density"
+                )
+                st.plotly_chart(fig_A, use_container_width=True)
+
+                # 8.3) Evolution of reserve until retirement (barras com A_mediana) + linha p50 sem aportes
+                # 8.3.1) Fatores anuais medianos por ano (G_med)
+                G_med = np.median(fatores_anuais, axis=1)  # shape = (n_anos,)
+
+                # 8.3.2) Caminho da reserva com aportes anuais A_mediana (no fim do ano)
+                V_path = [capital_inicial]
+                for k in range(n_anos):
+                    V_next = V_path[-1] * G_med[k] + A_mediana
+                    V_path.append(V_next)
+                anos_axis = np.arange(0, n_anos + 1, 1)
+
+                # 8.3.3) Linha de referência: mediana do fan chart (sem aportes) nos anos inteiros
+                p_years = p["years"].values
+                p50_vals = p["p50"].values
+                p50_anual = []
+                for k in range(n_anos + 1):
+                    idx = int(np.argmin(np.abs(p_years - k)))
+                    p50_anual.append(p50_vals[idx])
+
+                # 8.3.4) Plotar barras + linha
+                fig_ev = go.Figure()
+                fig_ev.add_trace(go.Bar(x=anos_axis, y=V_path, name="Reserve with median annual contribution"))
+                fig_ev.add_trace(go.Scatter(x=anos_axis, y=p50_anual, mode="lines+markers", name="Median (no contributions)"))
+                fig_ev.update_layout(
+                    title="Evolution of reserve until retirement",
+                    xaxis_title="Years", yaxis_title="Value (€)", barmode="overlay", hovermode="x unified"
+                )
+                st.plotly_chart(fig_ev, use_container_width=True)
+
+                # 8.4) Cheque determinístico com CAGR mediano
+                r_med = float(r["cagr_mediana"])
+                if r_med > -0.9999:
+                    if abs(r_med) < 1e-12:
+                        A_det = (objetivo_reserva - capital_inicial) / max(1, n_anos)
+                    else:
+                        fator = (1 + r_med) ** n_anos
+                        A_det = (objetivo_reserva - capital_inicial * fator) / ((fator - 1) / r_med)
+                    st.caption(
+                        f"✅ Deterministic check (median CAGR ≈ {100*r_med:.2f}%): "
+                        f"≈ **{A_det:,.2f} €/year**"
+                    )
+                else:
+                    st.caption("⚠️ Median CAGR invalid for deterministic check.")
+
+        # 9) Nota
+        st.caption("Notes: parameters estimated from daily log-returns of the portfolio. "
+                   "Enable 'usar_bootstrap=True' to preserve historical tails.")
+
 
 
 
@@ -608,31 +763,9 @@ if btn and selecionados:
     st.write(dados.columns)  # Isso vai listar todas as colunas do DataFrame
 
 
-    # --- Monte Carlo: cálculo sobre a CARTEIRA (usa apenas Close + pesos) ---
-    try:
-        resultado_mc = simular_monte_carlo_carteira(
-            dados_close=dados,            # 'dados' aqui já é ONLY Close por ticker (tua obter_dados)
-            pesos=pesos,
-            capital_inicial=1_000.0,     # ajusta se quiseres
-            n_anos=anos,                  # usa o slider já escolhido
-            simulacoes=10_000,
-            passos_por_ano=252,
-            usar_bootstrap=False,
-            seed=42
-        )
-        # --- Monte Carlo: visualização (em expander, sem botão) ---
-        mostrar_simulacao_carteira(resultado_mc, titulo="🔮 Monte Carlo Simulation (10 years)")
-    except Exception as e:
-        st.error(f"Erro na simulação de Monte Carlo: {e}")
-
-    
-
-    # Exibir MSE como feedback
-    st.write(f"Erro quadrático médio (MSE): {mse:.4f}")
-
-    # Gráfico da previsão de retornos
-    st.subheader("Previsão de Retornos Futuros")
-    st.write(modelo)
+    n_anos, objetivo_reserva, info = obter_objetivo_atuarial()
+    resultado_mc = simular_monte_carlo_carteira(dados, pesos, capital_inicial=1_000.0, n_anos=n_anos, simulacoes=10_000)
+    mostrar_simulacao_carteira(resultado_mc, objetivo_reserva=objetivo_reserva)
 
     st.write("Prévia dos dados carregados:")
     st.dataframe(dados.head())
