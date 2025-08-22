@@ -682,7 +682,7 @@ def mostrar_simulacao_carteira(
                 fig_ev.add_trace(go.Scatter(x=anos_axis, y=p50_anual, mode="lines+markers", name="Median (no contributions)"))
                 fig_ev.update_layout(
                     title="Evolution of reserve until retirement",
-                    xaxis_title="Years", yaxis_title="Value (€)", barmode="overlay", hovermode="x unified"
+                    xaxis_title="Years", yaxis_title="Value", barmode="overlay", hovermode="x unified"
                 )
                 st.plotly_chart(fig_ev, use_container_width=True)
 
@@ -696,7 +696,7 @@ def mostrar_simulacao_carteira(
                         A_det = (objetivo_reserva - capital_inicial * fator) / ((fator - 1) / r_med)
                     st.caption(
                         f"✅ Deterministic check (median CAGR ≈ {100*r_med:.2f}%): "
-                        f"≈ **{A_det:,.2f} €/year**"
+                        f"≈ **{A_det:,.2f} $/year**"
                     )
                 else:
                     st.caption("⚠️ Median CAGR invalid for deterministic check.")
@@ -760,8 +760,6 @@ if btn and selecionados:
     mostrar_performance(dados, pesos)
     mostrar_fronteira_heatmap(dados, pesos)
     mostrar_benchmark_simples(dados, pesos, benchmark_ticker=benchmark_ticker, anos=anos)
-    st.write(dados.columns)  # Isso vai listar todas as colunas do DataFrame
-
 
     n_anos, objetivo_reserva, info = obter_objetivo_atuarial()
     resultado_mc = simular_monte_carlo_carteira(dados, pesos, capital_inicial=1_000.0, n_anos=n_anos, simulacoes=10_000)

@@ -206,4 +206,4 @@ with st.expander("📈 Stock Analysis & Forecasting"):
 
 """)
 if st.button("📉 Go to Stock Forecasting"):
-    st.switch_page("Wallet/3_page3_test.py")
+    st.switch_page("Wallet/3_ativo.py")
