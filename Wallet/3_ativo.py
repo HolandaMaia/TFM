@@ -433,110 +433,327 @@ def mostrar_metricas_performance(metricas: dict):
 
 # ---------------------------------------------------------------------
 
-# ===================== LSTM SIMPLES: 150 -> 30 =====================
+# ===================== RF mínimo: prever retornos e avaliar vs baseline =====================
 import numpy as np
 import pandas as pd
+from math import sqrt
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error, mean_absolute_percentage_error
+import streamlit as st
+import plotly.graph_objects as go
 
-def _inferir_freq(idx: pd.DatetimeIndex) -> str:
-    """Intenta inferir la frecuencia de fechas; fallback a 'D' (diaria)."""
+
+# ----------- Utilidades -----------
+
+def preparar_close(obj) -> pd.DataFrame:
+    """
+    Retorna DataFrame com única coluna 'Close' (float) e índice datetime limpo.
+    Aceita: DataFrame normal, MultiIndex (yfinance) ou Series.
+    Se não houver 'Close', tenta 'Adj Close'; senão usa a primeira numérica.
+    """
+    if isinstance(obj, pd.Series):
+        s = obj.dropna().copy()
+        s.index = pd.to_datetime(s.index, errors="coerce")
+        s = s[~s.index.duplicated(keep="last")].sort_index()
+        return pd.DataFrame({"Close": pd.to_numeric(s, errors="coerce")}).dropna()
+
+    if not isinstance(obj, pd.DataFrame):
+        raise ValueError("Esperado DataFrame ou Series.")
+
+    df = obj.copy()
+    df.index = pd.to_datetime(df.index, errors="coerce")
+    df = df[~df.index.duplicated(keep="last")].sort_index()
+
+    if isinstance(df.columns, pd.MultiIndex):
+        cols_close = [c for c in df.columns if str(c[-1]).lower() == "close"]
+        if cols_close:
+            s = df[cols_close[0]].rename("Close")
+            return pd.DataFrame({"Close": pd.to_numeric(s, errors="coerce")}).dropna()
+        cols_adj = [c for c in df.columns if str(c[-1]).lower() in ("adj close", "adjclose", "adj_close")]
+        if cols_adj:
+            s = df[cols_adj[0]].rename("Close")
+            return pd.DataFrame({"Close": pd.to_numeric(s, errors="coerce")}).dropna()
+
+    if "Close" in df.columns:
+        col = df["Close"]
+        if isinstance(col, pd.DataFrame):
+            num = col.select_dtypes(include=[np.number])
+            s = num.iloc[:, 0] if not num.empty else pd.to_numeric(col.iloc[:, 0], errors="coerce")
+        else:
+            s = pd.to_numeric(col, errors="coerce")
+        return pd.DataFrame({"Close": s}).dropna()
+
+    for alt in ("Adj Close", "AdjClose", "adj_close", "adjclose"):
+        if alt in df.columns:
+            return pd.DataFrame({"Close": pd.to_numeric(df[alt], errors="coerce")}).dropna()
+
+    num = df.select_dtypes(include=[np.number])
+    if not num.empty:
+        return pd.DataFrame({"Close": num.iloc[:, 0]}).dropna()
+
+    raise ValueError("Não encontrei 'Close' nem coluna numérica utilizável.")
+
+
+def construir_features_retorno(df_close: pd.DataFrame, n_lags: int = 10):
+    """
+    Constrói features a partir de retornos logarítmicos:
+      y(t)  = retorno_log em t
+      X(t)  = [retorno_log(t-1..t-n_lags), médias e desvios (5,10,21) defasados]
+    Retorna X, y, idx (índice temporal de y) e séries de preço alinhadas (p_t e p_{t-1}).
+    """
+    close = df_close["Close"].astype(float)
+    r = np.log(close).diff()                      # retornos log
+    df_feat = pd.DataFrame({"ret": r}, index=close.index)
+
+    # lags de retorno
+    for k in range(1, n_lags + 1):
+        df_feat[f"ret_lag_{k}"] = r.shift(k)
+
+    # estatísticas defasadas (anti-leakage)
+    for w in (5, 10, 21):
+        df_feat[f"ret_mean_{w}"] = r.rolling(w).mean().shift(1)
+        df_feat[f"ret_std_{w}"]  = r.rolling(w).std().shift(1)
+
+    df_feat = df_feat.dropna()
+
+    y   = df_feat["ret"].values
+    X   = df_feat.drop(columns=["ret"]).values
+    idx = df_feat.index
+
+    # Preços alinhados aos alvos (sem NaN inicial): p_t e p_{t-1}
+    price_t   = close.reindex(idx)
+    price_tm1 = close.shift(1).reindex(idx)   # << chave para evitar NaN no primeiro ponto
+
+    return X, y, idx, price_t, price_tm1
+
+
+
+# ----------- Treino, avaliação e previsão -----------
+
+def treinar_e_avaliar_rf(df_close: pd.DataFrame, n_lags: int = 10,
+                         n_estimators: int = 300, seed: int = 42, fracao_teste: float = 0.2):
+    """
+    Split temporal, treino em retornos log e métricas em PREÇO (one-step) vs baseline ingênuo.
+    Retorna: (modelo_full, ultimo_x, metricas, aux)
+    """
+    from sklearn.ensemble import RandomForestRegressor
+    from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error, mean_absolute_percentage_error
+    from math import sqrt
+
+    def _metrica_preco(y_true_p, y_pred_p, y_naive_p):
+        """Calcula MAE/RMSE/MAPE com máscara de valores finitos (sem NaN/Inf)."""
+        y_true_p = np.asarray(y_true_p, dtype=float)
+        y_pred_p = np.asarray(y_pred_p, dtype=float)
+        y_naive_p = np.asarray(y_naive_p, dtype=float)
+
+        mask = np.isfinite(y_true_p) & np.isfinite(y_pred_p) & np.isfinite(y_naive_p)
+        y_t  = y_true_p[mask]
+        y_m  = y_pred_p[mask]
+        y_nv = y_naive_p[mask]
+
+        # se ainda ficar muito curto, evita quebrar
+        if y_t.size < 2:
+            return {"MAE": np.nan, "RMSE": np.nan, "MAPE_%": np.nan, "RMSE_naive": np.nan}
+
+        mae  = mean_absolute_error(y_t, y_m)
+        rmse = sqrt(mean_squared_error(y_t, y_m))
+        mape = mean_absolute_percentage_error(y_t, y_m) * 100.0
+        rmse_naive = sqrt(mean_squared_error(y_t, y_nv))
+        return {"MAE": mae, "RMSE": rmse, "MAPE_%": mape, "RMSE_naive": rmse_naive}
+
+    X, y, idx, p_t, p_tm1 = construir_features_retorno(df_close, n_lags)
+    n = len(X)
+    if n < 50:
+        raise ValueError("Poucos dados após features (≥50 linhas).")
+
+    n_test  = max(10, int(n * fracao_teste))
+    n_train = n - n_test
+
+    X_tr, y_tr = X[:n_train], y[:n_train]
+    X_te, y_te = X[n_train:], y[n_train:]
+    p_t_tr, p_tm1_tr = p_t[:n_train].values,  p_tm1[:n_train].values
+    p_t_te, p_tm1_te = p_t[n_train:].values,  p_tm1[n_train:].values
+
+    # RF com leve regularização
+    rf = RandomForestRegressor(
+        n_estimators=n_estimators,
+        max_depth=6,
+        min_samples_leaf=5,
+        random_state=seed,
+        n_jobs=-1
+    )
+    rf.fit(X_tr, y_tr)
+
+    # Predição de retornos
+    yhat_tr = rf.predict(X_tr)
+    yhat_te = rf.predict(X_te)
+
+    # Reconstrução de preço one-step: p̂_t = p_{t-1} * exp(r̂_t)
+    p_hat_tr = p_tm1_tr * np.exp(yhat_tr)
+    p_hat_te = p_tm1_te * np.exp(yhat_te)
+    p_naive_tr = p_tm1_tr   # baseline: retorno = 0
+    p_naive_te = p_tm1_te
+
+    # Métricas em preço (com máscara segura)
+    m_tr = _metrica_preco(p_t_tr, p_hat_tr, p_naive_tr)
+    m_te = _metrica_preco(p_t_te, p_hat_te, p_naive_te)
+
+    # R² em retornos (mais apropriado)
+    # Mascara finitos por segurança
+    mask_tr_r = np.isfinite(y_tr) & np.isfinite(yhat_tr)
+    mask_te_r = np.isfinite(y_te) & np.isfinite(yhat_te)
+    r2_tr = r2_score(y_tr[mask_tr_r], yhat_tr[mask_tr_r]) if mask_tr_r.any() else np.nan
+    r2_te = r2_score(y_te[mask_te_r], yhat_te[mask_te_r]) if mask_te_r.any() else np.nan
+
+    # Confiança: melhora relativa vs baseline no conjunto de teste
+    if np.isfinite(m_te["RMSE"]) and np.isfinite(m_te["RMSE_naive"]) and m_te["RMSE_naive"] > 0:
+        conf = max(0.0, min(100.0, 100.0 * (1.0 - (m_te["RMSE"] / m_te["RMSE_naive"]))))
+    else:
+        conf = 0.0
+
+    metricas = {
+        "train": {"MAE": m_tr["MAE"], "RMSE": m_tr["RMSE"], "MAPE_%": m_tr["MAPE_%"], "R2_returns": r2_tr},
+        "test":  {"MAE": m_te["MAE"], "RMSE": m_te["RMSE"], "MAPE_%": m_te["MAPE_%"], "R2_returns": r2_te},
+        "model_confidence_%": conf
+    }
+
+    # Re-treina em todo o dataset para projetar futuro
+    rf_full = RandomForestRegressor(
+        n_estimators=n_estimators,
+        max_depth=6,
+        min_samples_leaf=5,
+        random_state=seed,
+        n_jobs=-1
+    )
+    rf_full.fit(X, y)
+
+    # Guarda insumos para a etapa de previsão multi-step
+    ultimo_x = X[-1:].copy()
+    aux = {
+        "n_lags": n_lags,
+        "returns_series": np.log(df_close["Close"].astype(float)).diff().dropna().values,
+        "last_price": float(df_close["Close"].astype(float).iloc[-1]),
+        "last_index": df_close.index[-1]
+    }
+    return rf_full, ultimo_x, metricas, aux
+
+
+
+def prever_rf_futuro(modelo, aux, passos: int = 30) -> np.ndarray:
+    """
+    Gera trajetória futura de PREÇOS a partir de retornos previstos iterativamente.
+    Usa últimos n_lags retornos para formar as features a cada passo.
+    """
+    n_lags = aux["n_lags"]
+    r_hist = aux["returns_series"].copy()
+    p_last = aux["last_price"]
+
+    preds_price = []
+    for _ in range(passos):
+        # features = [lags de retorno] + estatísticas (5,10,21)
+        lags = r_hist[-n_lags:] if len(r_hist) >= n_lags else np.r_[np.zeros(n_lags - len(r_hist)), r_hist]
+        feats = list(lags[::-1])  # lag_1 primeiro
+        for w in (5, 10, 21):
+            serie_ref = r_hist if len(r_hist) >= w else np.r_[np.zeros(w - len(r_hist)), r_hist]
+            feats.append(serie_ref[-w:].mean())
+            feats.append(serie_ref[-w:].std(ddof=0))
+        x = np.array(feats, dtype=float).reshape(1, -1)
+
+        yhat = float(modelo.predict(x)[0])    # retorno log previsto
+        p_last = p_last * np.exp(yhat)        # preço futuro
+        preds_price.append(p_last)
+        r_hist = np.r_[r_hist, yhat]          # atualiza histórico de retornos
+
+    return np.array(preds_price, dtype=float)
+
+
+# ====== PATCH: forçar treino nos últimos 150 e prever próximos 30 ======
+
+def prever_rf_dias(df_raw: pd.DataFrame, dias: int = 30, n_lags: int = 10,
+                   n_estimators: int = 300, seed: int = 42,
+                   janela: int | None = None, usar_ultimos: int = 150):
+    """
+    Prepara série, TREINA APENAS COM OS ÚLTIMOS 'usar_ultimos' (padrão 150) e retorna (df_prev, métricas, base_usada).
+    Alias: 'janela' == 'n_lags' (compatibilidade com chamadas antigas).
+    """
+    if janela is not None:
+        n_lags = janela
+
+    base_full = preparar_close(df_raw)
+    # garante que existe dado suficiente; se não, cai para todo o histórico
+    usar_ultimos = int(min(max(usar_ultimos, 60), len(base_full)))
+    base_usada = base_full.tail(usar_ultimos).copy()
+
+    # treina/avalia SOMENTE na janela usada
+    modelo, ultimo_x, metricas, aux = treinar_e_avaliar_rf(
+        base_usada, n_lags=n_lags, n_estimators=n_estimators, seed=seed
+    )
+
+    # prevê 'dias' à frente a partir do último ponto observado
+    preds_price = prever_rf_futuro(modelo, aux, passos=dias)
+
+    # datas futuras continuam do fim do histórico total (equivalente ao fim de base_usada)
+    freq = pd.infer_freq(base_full.index) or "B"
+    ultima = base_full.index[-1]
     try:
-        f = pd.infer_freq(idx)
-        return f if f else "D"
+        datas_fut = pd.date_range(start=ultima, periods=dias + 1, freq=freq)[1:]
     except Exception:
-        return "D"
+        datas_fut = pd.date_range(start=ultima + pd.Timedelta(days=1), periods=dias, freq="D")
 
-def _crear_ventanas(serie_norm: np.ndarray, ventana: int) -> tuple[np.ndarray, np.ndarray]:
-    """Crea X,y para supervisado univariante con ventana deslizante (serie ya normalizada)."""
-    X, y = [], []
-    for i in range(ventana, len(serie_norm)):
-        X.append(serie_norm[i-ventana:i])
-        y.append(serie_norm[i])
-    X = np.array(X)
-    y = np.array(y)
-    # (muestras, pasos, 1)
-    return X.reshape((X.shape[0], X.shape[1], 1)), y
+    df_prev = pd.DataFrame({"RF Predicted Close": preds_price}, index=datas_fut)
+    return df_prev, metricas, base_usada
 
-def treinar_lstm_150(df: pd.DataFrame, ventana: int = 30, epochs: int = 20, batch_size: int = 16, unidades: int = 50, dropout: float = 0.2, seed: int = 42):
+
+def mostrar_predicao_rf_min(df_raw: pd.DataFrame, dias: int = 30, n_lags: int = 10,
+                            n_estimators: int = 300, seed: int = 42,
+                            janela: int | None = None, usar_ultimos: int = 150):
     """
-    Entrena una LSTM usando exclusivamente los últimos 150 registros de 'Close'.
-    - ventana por defecto: 30
-    - salida: (modelo, scaler, serie_close_usada)
+    Mostra histórico (apenas a janela usada) + previsão futura.
+    Alias: 'janela' == 'n_lags'. Por padrão: usa os ÚLTIMOS 150 -> prevê PRÓXIMOS 30.
     """
-    import tensorflow as tf
-    from sklearn.preprocessing import MinMaxScaler
+    if janela is not None:
+        n_lags = janela
 
-    if "Close" not in df.columns:
-        raise ValueError("DataFrame debe contener la columna 'Close'.")
+    df_prev, metricas, base_usada = prever_rf_dias(
+        df_raw, dias=dias, n_lags=n_lags, n_estimators=n_estimators,
+        seed=seed, usar_ultimos=usar_ultimos
+    )
 
-    # 1) Cortar a los últimos 150 puntos
-    df_150 = df.tail(150).copy()
-    if len(df_150) < ventana + 10:
-        raise ValueError("Datos insuficientes: se requieren al menos 150 registros y ventana razonable.")
+    # gráfico só com a janela usada (150) + previsão
+    hist = base_usada
 
-    serie = df_150["Close"].astype(float).values.reshape(-1, 1)
+    import plotly.graph_objects as go
+    import streamlit as st
 
-    # 2) Normalizar (fit solo en esta serie)
-    scaler = MinMaxScaler()
-    serie_n = scaler.fit_transform(serie)
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=hist.index, y=hist["Close"], mode="lines", name="Historical Close"))
+    fig.add_trace(go.Scatter(x=df_prev.index, y=df_prev["RF Predicted Close"],
+                             mode="lines+markers", name="RF Prediction", line=dict(dash="dot")))
+    fig.update_xaxes(range=[hist.index[0], df_prev.index[-1]])
+    fig.update_layout(hovermode="x unified")
+    st.subheader("Random Forest Prediction (Close) — last 150 → next 30")
+    st.plotly_chart(fig, use_container_width=True)
 
-    # 3) Crear ventanas supervisadas
-    X, y = _crear_ventanas(serie_n, ventana)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("🎲 Model Confidence", f"{metricas['model_confidence_%']:.1f}%")
+    c2.metric("📈 Training R² (returns)", f"{metricas['train']['R2_returns']:.3f}")
+    c3.metric("🧪 Test R² (returns)",     f"{metricas['test']['R2_returns']:.3f}")
 
-    # 4) Modelo LSTM sencillo
-    tf.keras.utils.set_random_seed(seed)
-    model = tf.keras.models.Sequential([
-        tf.keras.layers.LSTM(unidades, return_sequences=True, input_shape=(ventana, 1)),
-        tf.keras.layers.Dropout(dropout),
-        tf.keras.layers.LSTM(unidades, return_sequences=False),
-        tf.keras.layers.Dropout(dropout),
-        tf.keras.layers.Dense(1)
-    ])
-    model.compile(optimizer="adam", loss="mean_squared_error")
-    model.fit(X, y, epochs=epochs, batch_size=batch_size, verbose=0)
+    tabela = pd.DataFrame({
+        "Set": ["Train", "Test"],
+        "MAE (price)":  [metricas["train"]["MAE"],  metricas["test"]["MAE"]],
+        "RMSE (price)": [metricas["train"]["RMSE"], metricas["test"]["RMSE"]],
+        "MAPE (%)":     [metricas["train"]["MAPE_%"], metricas["test"]["MAPE_%"]],
+        "R² (returns)": [metricas["train"]["R2_returns"], metricas["test"]["R2_returns"]],
+    }).round({"MAE (price)": 4, "RMSE (price)": 4, "MAPE (%)": 2, "R² (returns)": 3})
+    st.dataframe(tabela, use_container_width=True)
 
-    return model, scaler, df_150["Close"].values  # devolvemos la serie usada
-
-def prever_lstm_30(model, scaler, serie_close_usada: np.ndarray, ventana: int = 30, pasos: int = 30) -> np.ndarray:
-    """
-    Predice 'pasos' futuros de forma iterativa usando la última 'ventana' de la serie usada en el entrenamiento.
-    Devuelve precios previstos en escala original.
-    """
-    # normalizar toda la serie usada
-    serie_n = scaler.transform(serie_close_usada.reshape(-1,1))
-    ventana_actual = serie_n[-ventana:].copy()
-
-    preds = []
-    for _ in range(pasos):
-        x = ventana_actual.reshape(1, ventana, 1)
-        yhat_n = model.predict(x, verbose=0).reshape(1, 1)         # en escala normalizada
-        yhat = scaler.inverse_transform(yhat_n)[0, 0]               # volver a precio
-        preds.append(yhat)
-        ventana_actual = np.vstack([ventana_actual[1:], yhat_n])    # deslizar ventana
-    return np.array(preds, dtype=np.float32)
-
-def prever_lstm_30_dias(df: pd.DataFrame, ventana: int = 30, epochs: int = 20) -> pd.DataFrame:
-    """
-    Función práctica: entrena con los últimos 150 registros y devuelve un DataFrame con la previsión de los próximos 30 pasos.
-    Index de salida: fechas futuras con la misma frecuencia inferida del df.
-    Columnas: 'LSTM Predicted Close'
-    """
-    # entrenar
-    model, scaler, serie_usada = treinar_lstm_150(df, ventana=ventana, epochs=epochs)
-    # prever
-    preds = prever_lstm_30(model, scaler, serie_usada, ventana=ventana, pasos=30)
-
-    # construir índice de fechas futuras
-    freq = _inferir_freq(df.index)
-    # última fecha observada
-    ultima_data = df.index[-1]
-    # próxima fecha (respetando freq); fallback: un día
-    try:
-        datas_futuras = pd.date_range(start=ultima_data, periods=31, freq=freq)[1:]
-    except Exception:
-        datas_futuras = pd.date_range(start=ultima_data + pd.Timedelta(days=1), periods=30, freq="D")
-
-    df_prev = pd.DataFrame({"LSTM Predicted Close": preds}, index=datas_futuras)
     return df_prev
+
+
+
+
+
 
 
 
@@ -581,7 +798,8 @@ if btn and ticker:
     data_fim = pd.Timestamp.today()
 
     dados = yf.download(ticker, start=data_inicio, end=data_fim, interval=frequencia, auto_adjust=False)
-    
+    df_precos = dados[["Close"]].dropna()
+
     if dados.empty:
         st.warning("⚠️ Nenhum dado encontrado para esse ativo e período.")
     else:
@@ -592,25 +810,10 @@ if btn and ticker:
         mostrar_grafico_tecnico(ticker, dados)
         metricas = calcular_metricas_performance(dados)
         mostrar_metricas_performance(metricas)
-        # Depois de carregar 'dados' (yfinance) e antes/ao lado do teu gráfico:
-    try:
-        previsao_30 = prever_lstm_30_dias(dados, ventana=30, epochs=20)
-        st.subheader("🧠 Previsão LSTM (próximos 30 passos)")
-        st.dataframe(previsao_30.tail())
-        # (opcional) plotar junto:
-        import plotly.graph_objects as go
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=dados.index, y=dados["Close"], name="Histórico (Close)", mode="lines"))
-        fig.add_trace(go.Scatter(x=previsao_30.index, y=previsao_30["LSTM Predicted Close"], name="Previsto (LSTM)", mode="lines", line=dict(dash="dash")))
-        fig.update_layout(height=450, xaxis_title="Data", yaxis_title="Preço de Fechamento")
-        st.plotly_chart(fig, use_container_width=True)
-    except Exception as e:
-        st.warning(f"Previsão LSTM não pôde ser gerada: {e}")
+        df_prev_rf = mostrar_predicao_rf_min(df_precos, dias=30, janela=10, usar_ultimos=150)
 
-        
-        
 
-        with st.expander("🔍 Ver dados brutos"):
+    with st.expander("🔍 Ver dados brutos"):
             st.dataframe(dados.tail())
 
 else:
