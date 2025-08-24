@@ -67,19 +67,19 @@ def calcular_metricas(dados, pesos):
 def mostrar_kpis(metrics):
     retorno, vol, sharpe, drawdown, _n, desvio, acumulado = metrics
     col1, col2, col3 = st.columns(3)
-    col1.metric("Retorno Esperado", f"{retorno:.2%}")
-    col2.metric("Volatilidade", f"{vol:.2%}")
+    col1.metric("Expected Return", f"{retorno:.2%}")
+    col2.metric("Volatility", f"{vol:.2%}")
     col3.metric("Sharpe Ratio", f"{sharpe:.2f}")
     col4, col5, col6 = st.columns(3)
-    col4.metric("Drawdown Máximo", f"{drawdown:.2%}")
-    col5.metric("Desvio Padrão", f"{desvio:.2%}")
-    col6.metric("Retorno Acumulado", f"{acumulado:.2%}")
+    col4.metric("Max Drawdown", f"{drawdown:.2%}")
+    col5.metric("Standard Deviation", f"{desvio:.2%}")
+    col6.metric("Cumulative Return", f"{acumulado:.2%}")
 
 
 #----------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 def mostrar_performance(dados, pesos):
-    st.subheader("Performance Histórica")
+    st.subheader("Historical Performance")
     returns = np.log(dados / dados.shift(1)).dropna()
     carteira = (1 + returns.dot(pesos)).cumprod()
     drawdown = carteira / carteira.cummax() - 1
@@ -88,7 +88,7 @@ def mostrar_performance(dados, pesos):
     fig_ret = px.area(
     x=carteira.index,
     y=((carteira - 1) * 100),  # transforma em %
-    title="Retorno Acumulado")
+    title="Cumulative Return (%)")
     fig_ret.update_layout(
     xaxis_title=None,
     yaxis_title=None,
@@ -124,18 +124,18 @@ def mostrar_fronteira(dados, pesos):
         results[1, i] = port_ret
         results[2, i] = port_ret / port_vol if port_vol else 0
     fig = px.scatter(x=results[0], y=results[1], color=results[2],
-                    labels={"x": "Volatilidade", "y": "Retorno"},
-                    title="Fronteira de Markowitz")
+                    labels={"x": "Volatility", "y": "Return"},
+                    title="Markowitz Frontier")
     carteira_ret = np.dot(pesos, mu)
     carteira_vol = np.sqrt(pesos.values.T @ cov.values @ pesos.values)
     fig.add_trace(go.Scatter(x=[carteira_vol], y=[carteira_ret], mode="markers",
-                            marker=dict(color="red", size=10), name="Carteira"))
+                            marker=dict(color="red", size=10), name="Wallet"))
     return fig
 
 #----------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 def mostrar_tabela_ativos(dados, pesos):
-    st.subheader("Detalhamento por Ativo")
+    st.subheader("Asset Breakdown")
     ultimo_preco = dados.ffill().iloc[-1]
     investimento = pesos * 1000  # hipotético
     unidades = investimento / ultimo_preco
@@ -144,13 +144,13 @@ def mostrar_tabela_ativos(dados, pesos):
     var_1m = dados.pct_change(21).iloc[-1]
     tabela = pd.DataFrame({
         "Ticker": pesos.index,
-        "Peso": (pesos * 100).round(2),
-        "Preço Atual": ultimo_preco.round(2),
-        "Unidades": unidades.round(2),
-        "Valor Investido": investimento.round(2),
-        "Variação 24h": (var_1d * 100).round(2),
-        "7d": (var_7d * 100).round(2),
-        "1m": (var_1m * 100).round(2),
+        "Weight (%)": (pesos * 100).round(2),
+        "Current Price": ultimo_preco.round(2),
+        "Units": unidades.round(2),
+        "Invested Value": investimento.round(2),
+        "24h Change (%)": (var_1d * 100).round(2),
+        "7d Change (%)": (var_7d * 100).round(2),
+        "1m Change (%)": (var_1m * 100).round(2),
     })
     st.dataframe(tabela, use_container_width=True)
 
@@ -188,9 +188,9 @@ def plot_combined_chart(df, symbol, sma_values=None, macd=None, signal=None):
 
     fig.update_layout(
         title=f'{symbol} - Candlestick + SMA + MACD',
-        xaxis_title='Data',
-        yaxis_title='Preço',
-        xaxis2_title='Data',
+        xaxis_title='Date',
+        yaxis_title='Price',
+        xaxis2_title='Date',
         yaxis2_title='MACD',
         xaxis_rangeslider_visible=False,
         height=600,
@@ -220,7 +220,7 @@ def mostrar_graficos_ativos(pesos, anos, frequencia):
 
         for ticker in tickers:
             if ticker not in datos_ohlc.columns.levels[0]:
-                st.warning(f"❗ Datos no disponibles para {ticker}")
+                st.warning(f"❗ Data not available for {ticker}")
                 continue
 
             df = datos_ohlc[ticker].dropna().copy()
@@ -228,7 +228,7 @@ def mostrar_graficos_ativos(pesos, anos, frequencia):
             df['date'] = df.index
 
             if df.empty or df[['open', 'high', 'low', 'close']].isna().all().any():
-                st.warning(f"❗ Datos incompletos para {ticker}")
+                st.warning(f"❗ Data not available for {ticker}")
                 continue
 
             # Indicadores
@@ -249,10 +249,10 @@ def mostrar_graficos_ativos(pesos, anos, frequencia):
 #----------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 def mostrar_benchmark_simples(dados, pesos, benchmark_ticker, anos=10):
-    st.subheader("📊 Análise Histórica do Benchmark")
+    st.subheader("📊 Benchmark Historical Analysis")
 
     if not benchmark_ticker:
-        st.warning("⚠️ Nenhum benchmark selecionado.")
+        st.warning("⚠️ No benchmark selected.")
         return
 
     data_fim = pd.Timestamp.today()
@@ -267,11 +267,11 @@ def mostrar_benchmark_simples(dados, pesos, benchmark_ticker, anos=10):
             progress=False
         )
     except Exception as e:
-        st.error(f"❌ Erro ao baixar dados do benchmark: {e}")
+        st.error(f"❌ Error downloading benchmark data: {e}")
         return
 
     if benchmark_df.empty or "Close" not in benchmark_df.columns:
-        st.warning("⚠️ Dados de fechamento do benchmark indisponíveis.")
+        st.warning("⚠️ Benchmark closing data unavailable.")
         return
 
     # Série de preços do benchmark
@@ -294,19 +294,19 @@ def mostrar_benchmark_simples(dados, pesos, benchmark_ticker, anos=10):
     carteira_pct = carteira_pct.loc[datas_comuns]
 
     # 📉 Gráfico 1: Preço de Fechamento do Benchmark
-    st.markdown(f"### 💵 Evolução do Preço - `{benchmark_ticker}`")
+    st.markdown(f"### 💵 Price Evolution - `{benchmark_ticker}`")
     fig_close = px.line(
         x=close_series.index,
         y=close_series.values,
-        title="Preço de Fechamento",
-        labels={"x": "Data", "y": "Preço"}
+        title="Closing Price",
+        labels={"x": "Date", "y": "Price"}
     )
-    fig_close.update_yaxes(tickprefix="US$ ", title="Preço")
+    fig_close.update_yaxes(tickprefix="US$ ", title="Price")
     fig_close.update_layout(height=400, showlegend=False)
     st.plotly_chart(fig_close, use_container_width=True, key="grafico_preco_benchmark")
 
     # 📈 Gráfico 2: Retorno Acumulado (%)
-    st.markdown("### 📈 Retorno Acumulado (%) - Benchmark vs Carteira")
+    st.markdown("### 📈 Cumulative Return (%) - Benchmark vs Portfolio")
     fig_ret = go.Figure()
 
     fig_ret.add_trace(go.Scatter(
@@ -325,12 +325,12 @@ def mostrar_benchmark_simples(dados, pesos, benchmark_ticker, anos=10):
         line=dict(color="seagreen")
     ))
 
-    fig_ret.update_yaxes(title="Retorno (%)", ticksuffix="%")
+    fig_ret.update_yaxes(title="Return (%)", ticksuffix="%")
     fig_ret.update_layout(
         height=400,
-        xaxis_title="Data",
-        title="Retorno Acumulado em %",
-        legend_title="Série"
+        xaxis_title="Date",
+        title="Cumulative Return (%)",
+        legend_title="Series"
     )
     st.plotly_chart(fig_ret, use_container_width=True, key="grafico_retorno_comparado")
 
@@ -350,13 +350,13 @@ def mostrar_heatmap(dados):
 
 
 def mostrar_fronteira_heatmap(dados, pesos):
-    st.subheader("Fronteira Eficiente e Correlação")
+    st.subheader("Efficient Frontier and Correlation")
     col1, col2 = st.columns([3, 1])
     with col1:
         fig_front = mostrar_fronteira(dados, pesos)
         st.plotly_chart(fig_front, use_container_width=True)
     with col2:
-        st.markdown("** Matriz de Correlação**")  
+        st.markdown("**Correlation Matrix**")
         fig_heat = mostrar_heatmap(dados)
         st.pyplot(fig_heat, use_container_width=True)
 
@@ -414,7 +414,7 @@ def simular_monte_carlo_carteira(
     # 1) Alinhar colunas/pesos e normalizar
     cols = [c for c in dados_close.columns if c in pesos.index]
     if not cols:
-        raise ValueError("Não há interseção entre colunas de dados e índices de pesos.")
+        raise ValueError("No intersection between data columns and weight indices.")
     dados_close = dados_close[cols].ffill().dropna()
     pesos = pesos.loc[cols]
     pesos = pesos / pesos.sum()
@@ -436,11 +436,11 @@ def simular_monte_carlo_carteira(
         sharpe_a = mu_a / vol_a if vol_a > 0 else np.nan
         import streamlit as st
         st.write({
-            "mu_log_diario": mu_d,
-            "sigma_log_diario": sigma_d,
-            "retorno_anual_aprox(%)": mu_a * 100,
-            "vol_anual(%)": vol_a * 100,
-            "sharpe_aprox": sharpe_a
+            "daily_log_mean": mu_d,
+            "daily_log_std": sigma_d,
+            "annual_return_approx(%)": mu_a * 100,
+            "annual_volatility(%)": vol_a * 100,
+            "sharpe_approx": sharpe_a
         })
 
     # 4) Simulação com passo diário (dt = 1 dia)
@@ -711,39 +711,46 @@ def mostrar_simulacao_carteira(
 
 
 #----------------------------------------------------------------------------------------------------------------------------------------------------------------------
-st.title("📊 Dashboard da Carteira Otimizada")
+st.title("📊 Optimized Portfolio Dashboard")
 
-st.sidebar.header("Configurações da Carteira")
+st.sidebar.header("Portfolio Settings")
 universo = carregar_universo()
 
-# Filtro obrigatório: Tipo de Ativo
+# Mandatory filter: Asset Type
 tipos = sorted(universo.get("Tipo de Ativo", pd.Series()).dropna().unique().tolist())
-tipo_escolhido = st.sidebar.selectbox("Tipo de Ativo", tipos)
+tipo_escolhido = st.sidebar.selectbox("Asset Type", tipos)
 dados_filtrados = universo[universo["Tipo de Ativo"] == tipo_escolhido]
 
-# Filtros dinâmicos opcionais (País, Setor, Indústria)
+# Optional dynamic filters (Country, Sector, Industry)
 for coluna in ["País", "Setor", "Indústria"]:
     if coluna in dados_filtrados.columns:
         opcoes = sorted(dados_filtrados[coluna].dropna().unique())
         if len(opcoes) > 1:
-            escolha = st.sidebar.selectbox(coluna, ["Todos"] + opcoes)
-            if escolha != "Todos":
+            label = coluna
+            if coluna == "País":
+                label = "Country"
+            elif coluna == "Setor":
+                label = "Sector"
+            elif coluna == "Indústria":
+                label = "Industry"
+            escolha = st.sidebar.selectbox(label, ["All"] + opcoes)
+            if escolha != "All":
                 dados_filtrados = dados_filtrados[dados_filtrados[coluna] == escolha]
 
 # Multiselect: Nome Curto visível, Ticker interno
 nomes_para_tickers = dados_filtrados.set_index("Nome Curto")["Ticker"].dropna().to_dict()
-selecionados_nomes = st.sidebar.multiselect("Ativos", list(nomes_para_tickers.keys()))
+selecionados_nomes = st.sidebar.multiselect("Assets", list(nomes_para_tickers.keys()))
 selecionados = [nomes_para_tickers[nome] for nome in selecionados_nomes]
 
 # Parâmetros adicionais
-anos = st.sidebar.slider("Horizonte (anos)", 1, 20, 10)
-frequencia = st.sidebar.selectbox("Frequência", ["1d", "1wk", "1mo"])
+anos = st.sidebar.slider("Investment Horizon (years)", 1, 20, 10)
+frequencia = st.sidebar.selectbox("Frequency", ["1d", "1wk", "1mo"])
 # 📌 Caixa para seleção de Benchmark (apenas ativos tipo "Index")
 benchmarks_df = universo[universo["Tipo de Ativo"] == "INDEX"]
 benchmarks_opcoes = benchmarks_df.set_index("Nome Curto")["Ticker"].dropna().to_dict()
-benchmark_escolhido_nome = st.sidebar.selectbox("Benchmark", ["Nenhum"] + list(benchmarks_opcoes.keys()))
-benchmark_ticker = benchmarks_opcoes.get(benchmark_escolhido_nome) if benchmark_escolhido_nome != "Nenhum" else None
-btn = st.sidebar.button("Otimizar Carteira")
+benchmark_escolhido_nome = st.sidebar.selectbox("Benchmark", ["None"] + list(benchmarks_opcoes.keys()))
+benchmark_ticker = benchmarks_opcoes.get(benchmark_escolhido_nome) if benchmark_escolhido_nome != "None" else None
+btn = st.sidebar.button("Optimize Portfolio")
 
 
 #----------------------------------------------------------------------------------------------------------------------------------------------------------------------
