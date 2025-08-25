@@ -540,7 +540,7 @@ def mostrar_simulacao_carteira(
       - PDF do CAGR
       - Histograma e CDF do retorno final
       - (Opcional) Distribuição do aporte anual necessário (se objetivo_reserva for passado)
-    Labels em inglês; textos em PT-BR.
+    Labels em inglês; código e comentários em PT-BR.
     """
     import numpy as np
     import plotly.graph_objects as go
@@ -624,9 +624,8 @@ def mostrar_simulacao_carteira(
         )
         st.plotly_chart(fig_cdf, use_container_width=True)
 
-        # 8) (Opcional) Aporte anual necessário se houver objetivo
+        # 8) Aporte anual (opcional)
         if objetivo_reserva is not None and np.isfinite(objetivo_reserva) and fatores_anuais is not None:
-            # 8.1) Calcular distribuição de A
             A_vect = calcular_aporte_anual(
                 fatores_anuais=fatores_anuais,
                 V0=capital_inicial,
@@ -640,13 +639,43 @@ def mostrar_simulacao_carteira(
                 A_p5      = float(np.percentile(A_valid, 5))
                 A_p95     = float(np.percentile(A_valid, 95))
 
+                # --- Contribuições ---
                 d1, d2, d3, d4 = st.columns(4)
                 d1.metric("Annual Contribution (Median)", f"{A_mediana:,.2f} €")
                 d2.metric("Annual Contribution (P5)",     f"{A_p5:,.2f} €")
                 d3.metric("Annual Contribution (P95)",    f"{A_p95:,.2f} €")
                 d4.metric("Horizon",                      f"{n_anos} years")
 
-                # 8.2) Histograma de A
+                # --- Bloco atuarial abaixo ---
+                res = st.session_state.get("actuarial_result", {}) or {}
+                ui  = st.session_state.get("user_inputs", {}) or {}
+
+                try:
+                    objetivo_res_calc = float(res.get("reserva_aposentadoria", np.nan))
+                except Exception:
+                    objetivo_res_calc = np.nan
+
+                try:
+                    taxa_juros_calc = float(ui.get("taxa_juros", 0.0))
+                except Exception:
+                    taxa_juros_calc = 0.0
+
+                idade_atual = ui.get("idade_atual", None)
+                idade_apos  = ui.get("idade_apos", None)
+
+                st.markdown("### 📊 Actuarial Parameters")
+                a1, a2, a3, a4 = st.columns(4)
+                a1.metric("Actuarial target (retirement)",
+                          f"{objetivo_res_calc:,.2f} €" if np.isfinite(objetivo_res_calc) else "—")
+                a2.metric("Discount/interest rate",
+                          f"{taxa_juros_calc*100:.2f}%" if np.isfinite(taxa_juros_calc) else "—")
+                if idade_atual is not None:
+                    a3.metric("Current age", f"{int(idade_atual)}")
+                if idade_apos is not None:
+                    a4.metric("Retirement age", f"{int(idade_apos)}")
+
+
+                # Histograma de A
                 ha, ba = np.histogram(A_valid, bins=50, density=True)
                 xa = (ba[:-1] + ba[1:]) / 2.0
                 fig_A = go.Figure()
@@ -657,18 +686,14 @@ def mostrar_simulacao_carteira(
                 )
                 st.plotly_chart(fig_A, use_container_width=True)
 
-                # 8.3) Evolution of reserve until retirement (barras com A_mediana) + linha p50 sem aportes
-                # 8.3.1) Fatores anuais medianos por ano (G_med)
-                G_med = np.median(fatores_anuais, axis=1)  # shape = (n_anos,)
-
-                # 8.3.2) Caminho da reserva com aportes anuais A_mediana (no fim do ano)
+                # Evolution of reserve until retirement
+                G_med = np.median(fatores_anuais, axis=1)
                 V_path = [capital_inicial]
                 for k in range(n_anos):
                     V_next = V_path[-1] * G_med[k] + A_mediana
                     V_path.append(V_next)
                 anos_axis = np.arange(0, n_anos + 1, 1)
 
-                # 8.3.3) Linha de referência: mediana do fan chart (sem aportes) nos anos inteiros
                 p_years = p["years"].values
                 p50_vals = p["p50"].values
                 p50_anual = []
@@ -676,17 +701,19 @@ def mostrar_simulacao_carteira(
                     idx = int(np.argmin(np.abs(p_years - k)))
                     p50_anual.append(p50_vals[idx])
 
-                # 8.3.4) Plotar barras + linha
                 fig_ev = go.Figure()
-                fig_ev.add_trace(go.Bar(x=anos_axis, y=V_path, name="Reserve with median annual contribution"))
-                fig_ev.add_trace(go.Scatter(x=anos_axis, y=p50_anual, mode="lines+markers", name="Median (no contributions)"))
+                fig_ev.add_trace(go.Bar(x=anos_axis, y=V_path,
+                                        name="Reserve with median annual contribution"))
+                fig_ev.add_trace(go.Scatter(x=anos_axis, y=p50_anual,
+                                            mode="lines+markers",
+                                            name="Median (no contributions)"))
                 fig_ev.update_layout(
                     title="Evolution of reserve until retirement",
-                    xaxis_title="Years", yaxis_title="Value", barmode="overlay", hovermode="x unified"
+                    xaxis_title="Years", yaxis_title="Value (€)", barmode="overlay", hovermode="x unified"
                 )
                 st.plotly_chart(fig_ev, use_container_width=True)
 
-                # 8.4) Cheque determinístico com CAGR mediano
+                # Cheque determinístico com CAGR mediano
                 r_med = float(r["cagr_mediana"])
                 if r_med > -0.9999:
                     if abs(r_med) < 1e-12:
@@ -696,7 +723,7 @@ def mostrar_simulacao_carteira(
                         A_det = (objetivo_reserva - capital_inicial * fator) / ((fator - 1) / r_med)
                     st.caption(
                         f"✅ Deterministic check (median CAGR ≈ {100*r_med:.2f}%): "
-                        f"≈ **{A_det:,.2f} $/year**"
+                        f"≈ **{A_det:,.2f} €/year**"
                     )
                 else:
                     st.caption("⚠️ Median CAGR invalid for deterministic check.")
@@ -704,6 +731,7 @@ def mostrar_simulacao_carteira(
         # 9) Nota
         st.caption("Notes: parameters estimated from daily log-returns of the portfolio. "
                    "Enable 'usar_bootstrap=True' to preserve historical tails.")
+
 
 
 
