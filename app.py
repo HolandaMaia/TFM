@@ -1,6 +1,5 @@
 import streamlit as st
-
-print("oi")
+        
 
 
 homepage = st.Page("Homepage/1_Homepage.py", title="Homepage")

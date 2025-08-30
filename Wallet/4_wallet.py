@@ -13,17 +13,17 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Dashboard da Carteira", layout="wide")
+st.set_page_config(page_title="Wallet Dashboard", layout="wide")
 
 #----------------------------------------------------------------------------------------------------------------------------------------------------------------------
 @st.cache_resource
 def carregar_universo(path="dados/ativos_totais.xlsx"):
-    """Carrega o universo de ativos a partir de um arquivo Excel."""
+    # Carrega o universo de ativos a partir de um arquivo Excel
     try:
         df = pd.read_excel(path)
         return df
     except Exception as e:
-        st.error(f"Erro ao carregar base de ativos: {e}")
+        st.error(f"Error loading asset database: {e}")  
         return pd.DataFrame()
 
 #----------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -41,8 +41,12 @@ def otimizar_carteira(dados):
     inv_cov = np.linalg.inv(cov)
     ones = np.ones(len(mu))
     w = inv_cov @ mu
-    w = np.maximum(w, 0)
-    w = w / np.sum(w)
+    w = np.clip(w, 0, None)
+    if w.sum() == 0:
+        # 🇪🇸 Si todo es 0 (caso extremo), repartir uniforme
+        w = np.ones_like(w) / len(w)
+    else:
+        w = w / w.sum()
     return pd.Series(w, index=dados.columns)
 
 #----------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -801,6 +805,7 @@ if btn and selecionados:
     mostrar_simulacao_carteira(resultado_mc, objetivo_reserva=objetivo_reserva)
 
     st.write("Prévia dos dados carregados:")
+    
     st.dataframe(dados.head())
 else:
     st.info("Escolha os ativos e clique em Otimizar Carteira")
