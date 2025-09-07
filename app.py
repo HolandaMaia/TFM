@@ -10,7 +10,7 @@ page3 = st.Page("Actuarial/1_apage1.py", title="page1")
 
 pg = st.navigation({
                     "Homepage": [homepage],
-                    "Atuarial": [calculadora,page3],
+                    "Atuarial": [calculadora],
                     "Wallet": [page1, page2]
         })
 
