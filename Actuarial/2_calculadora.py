@@ -29,9 +29,10 @@ def carregar_tabela_mortalidade(caminho_arquivo: str, aba: str = "Estimates 2016
     df['lx'] = pd.to_numeric(df['lx'], errors='coerce')
     df['ex'] = pd.to_numeric(df['ex'].astype(str).str.replace(",", "."), errors='coerce')
     df['local'] = df['local'].astype(str).str.strip()
-
+    df['tipo'] = df['tipo'].astype(str).str.strip()
+    
     df = df.dropna(subset=['idade', 'lx', 'ex', 'ano', 'local', 'tipo'])
-    df = df[df['ano'] == ano_alvo]
+    df = df[df['ano'] == 2023]
     df = df.sort_values(['local', 'idade']).reset_index(drop=True)
     return df
 
@@ -42,6 +43,9 @@ def calcular_reserva(df_mortalidade, local, idade_atual, idade_apos, renda_mensa
     v = 1 / (1 + taxa_juros)
 
     tabua = df_mortalidade[df_mortalidade['local'] == local].sort_values(by='idade')
+    if not (tabua['idade'] == idade_apos).any():
+        return None
+    
     try:
         expectativa_vida = tabua[tabua['idade'] == idade_apos]['ex'].values[0]
     except IndexError:
@@ -61,7 +65,7 @@ def calcular_reserva(df_mortalidade, local, idade_atual, idade_apos, renda_mensa
     }
 
 # --- Função de visualização ---
-def mostrar_resultado(res, idade_atual, idade_apos, taxa_juros):
+def mostrar_resultado(res, idade_atual, idade_apos, taxa_juros, regiao, df_regiao):
     st.markdown(f"### 📌 Region Statistics - {regiao}")
     col4, col5, col6 = st.columns(3)
 
@@ -69,14 +73,22 @@ def mostrar_resultado(res, idade_atual, idade_apos, taxa_juros):
     df_regiao['diff'] = (df_regiao['idade'] - df_regiao['ex']).abs()
     idade_ex_proximos = df_regiao.loc[df_regiao['diff'].idxmin(), 'idade']
     col4.metric("Age ≈ Expected Remaining Years", f"{int(idade_ex_proximos)}")
+    
+    if (df_regiao['idade'] == 0).any():
+        le_0 = df_regiao.loc[df_regiao['idade'] == 0, 'ex'].values[0]
+    else:
+        le_0 = df_regiao['ex'].iloc[0]
 
-    col5.metric("Life Expectancy", f"{df_regiao.loc[df_regiao['idade'] == 0, 'ex'].values[0]:.1f} years")
+    col5.metric("Life Expectancy", f"{le_0:.1f} years")
 
     # Calcular probabilidade de sobreviver até a idade da aposentadoria
-    prob_sobrevivencia_apos = (
-        (df_regiao.loc[df_regiao['idade'] == idade_apos, 'lx'].values[0] /
-        df_regiao.loc[df_regiao['idade'] == idade_atual, 'lx'].values[0]) * 100
-    )
+    if (df_regiao['idade'] == idade_apos).any() and (df_regiao['idade'] == idade_atual).any():
+        prob_sobrevivencia_apos = (
+            (df_regiao.loc[df_regiao['idade'] == idade_apos, 'lx'].values[0] /
+             df_regiao.loc[df_regiao['idade'] == idade_atual, 'lx'].values[0]) * 100
+        )
+    else:
+        prob_sobrevivencia_apos = float('nan')
 
     col6.metric(
     f"Probability of surviving from {idade_atual} to {idade_apos} years",
@@ -151,10 +163,11 @@ def mostrar_resultado(res, idade_atual, idade_apos, taxa_juros):
     capital_sem_juros = [res['reserva_aposentadoria']]
     renda_anual = res['renda_anual']
 
-    for _ in range(1, res['anos_de_renda']):
-        capital_com_juros.append(capital_com_juros[-1] * (1 + taxa_juros) - renda_anual)
-        capital_sem_juros.append(capital_sem_juros[-1] - renda_anual)
-
+    if res['anos_de_renda'] > 0:
+        for _ in range(1, res['anos_de_renda']):
+            capital_com_juros.append(capital_com_juros[-1] * (1 + taxa_juros) - renda_anual)
+            capital_sem_juros.append(capital_sem_juros[-1] - renda_anual)
+    
     df_apos = pd.DataFrame({
         "Idade": idades_apos,
         "with Interest": capital_com_juros,
@@ -178,7 +191,7 @@ def mostrar_resultado(res, idade_atual, idade_apos, taxa_juros):
 st.set_page_config(page_title="Calculadora Atuarial", layout="wide")
 st.title("🧮 Actuarial Retirement Reserve Calculator")
 
-@st.cache_resource
+@st.cache_data(show_spinner=False)
 def carregar_dados():
     caminho = r"C:\\Users\\mathe\\OneDrive\\Área de Trabalho\\MASTER\\FLI\\FMI\\dados\\WPP2024_MORT_F06_1_SINGLE_AGE_LIFE_TABLE_ESTIMATES_BOTH_SEXES.xlsx"
     return carregar_tabela_mortalidade(caminho)
@@ -187,9 +200,9 @@ df_mortalidade = carregar_dados()
 
 st.sidebar.header("User Parameters")
 
-tipos_locais_disponiveis = df_mortalidade['Type'].dropna().unique()
+tipos_locais_disponiveis = df_mortalidade['tipo'].dropna().unique()
 tipo_local = st.sidebar.selectbox("Local Type", sorted(tipos_locais_disponiveis))
-locais_filtrados = df_mortalidade[df_mortalidade['Type'] == tipo_local]['local'].dropna().unique()
+locais_filtrados = df_mortalidade[df_mortalidade['tipo'] == tipo_local]['local'].dropna().unique()
 regiao = st.sidebar.selectbox("Region", sorted(locais_filtrados))
 idade_atual = st.sidebar.number_input("Current Age", min_value=18, max_value=100, value=35)
 idade_apos = st.sidebar.number_input("Retirement Age", min_value=idade_atual + 1, max_value=100, value=67)
@@ -210,6 +223,6 @@ if st.sidebar.button("Calculate Reserve"):
             "taxa_juros": taxa_juros,
         }
 
-        mostrar_resultado(res, idade_atual, idade_apos, taxa_juros)
+        mostrar_resultado(res, idade_atual, idade_apos, taxa_juros, regiao, df_regiao)
     else:
         st.warning("Could not find the age in the mortality table.")

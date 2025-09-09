@@ -510,26 +510,24 @@ def simular_monte_carlo_carteira(
         "fatores_anuais": fatores_anuais,
     }
 
-# --- Cálculo do aporte anual necessário ---
-def calcular_aporte_anual(fatores_anuais: np.ndarray, V0: float, FV_objetivo: float) -> np.ndarray:
+# --- Cálculo do aporte anual necessário (IGNORANDO capital inicial) ---
+def calcular_aporte_anual_sem_capital(fatores_anuais: np.ndarray, FV_objetivo: float) -> np.ndarray:
     """
-    Fórmula de valor futuro com aportes no final de cada ano:
-    FV = V0*ΠG + A * Σ Π(G_{t+1..N})
-    => A = (FV_objetivo - V0*ΠG) / S
+    Valor futuro com aportes no fim de cada ano, desconsiderando o capital inicial:
+      FV = A * Σ Π(G_{t+1..N})
+      => A = FV_objetivo / S
     """
     N, sims = fatores_anuais.shape
-    prod_total = fatores_anuais.prod(axis=0)
 
     suf_prod = np.ones((N + 1, sims))
     for k in range(N - 1, -1, -1):
         suf_prod[k, :] = suf_prod[k + 1, :] * fatores_anuais[k, :]
     S = np.sum(suf_prod[1:, :], axis=0)
 
-    numerador = FV_objetivo - V0 * prod_total
     S_seguro = np.where(S <= 1e-12, np.nan, S)
-    A = numerador / S_seguro
-    A = np.where(np.isnan(A), np.nan, np.maximum(0.0, A))
-    return A
+    A_raw = FV_objetivo / S_seguro
+    return A_raw
+
 
 
 def mostrar_simulacao_carteira(
@@ -628,44 +626,33 @@ def mostrar_simulacao_carteira(
         )
         st.plotly_chart(fig_cdf, use_container_width=True)
 
-        # 8) Aporte anual (opcional)
+        # 8) Aporte anual (modelo 2: ignorar capital inicial)
         if objetivo_reserva is not None and np.isfinite(objetivo_reserva) and fatores_anuais is not None:
-            A_vect = calcular_aporte_anual(
+            A_sem = calcular_aporte_anual_sem_capital(
                 fatores_anuais=fatores_anuais,
-                V0=capital_inicial,
                 FV_objetivo=float(objetivo_reserva)
             )
-            A_valid = A_vect[np.isfinite(A_vect)]
+            A_valid = A_sem[np.isfinite(A_sem)]
 
-            st.markdown("### 💶 Required Annual Contribution")
+            st.markdown("### 💶 Required Annual Contribution (ignoring initial capital)")
             if A_valid.size > 0:
                 A_mediana = float(np.median(A_valid))
                 A_p5      = float(np.percentile(A_valid, 5))
                 A_p95     = float(np.percentile(A_valid, 95))
 
-                # --- Contribuições ---
                 d1, d2, d3, d4 = st.columns(4)
                 d1.metric("Annual Contribution (Median)", f"{A_mediana:,.2f} €")
                 d2.metric("Annual Contribution (P5)",     f"{A_p5:,.2f} €")
                 d3.metric("Annual Contribution (P95)",    f"{A_p95:,.2f} €")
                 d4.metric("Horizon",                      f"{n_anos} years")
 
-                # --- Bloco atuarial abaixo ---
+                # --- parâmetros atuariais exibidos abaixo ---
                 res = st.session_state.get("actuarial_result", {}) or {}
                 ui  = st.session_state.get("user_inputs", {}) or {}
-
-                try:
-                    objetivo_res_calc = float(res.get("reserva_aposentadoria", np.nan))
-                except Exception:
-                    objetivo_res_calc = np.nan
-
-                try:
-                    taxa_juros_calc = float(ui.get("taxa_juros", 0.0))
-                except Exception:
-                    taxa_juros_calc = 0.0
-
-                idade_atual = ui.get("idade_atual", None)
-                idade_apos  = ui.get("idade_apos", None)
+                objetivo_res_calc = float(res.get("reserva_aposentadoria", float("nan")))
+                taxa_juros_calc   = float(ui.get("taxa_juros", 0.0))
+                idade_atual       = ui.get("idade_atual", None)
+                idade_apos        = ui.get("idade_apos", None)
 
                 st.markdown("### 📊 Actuarial Parameters")
                 a1, a2, a3, a4 = st.columns(4)
@@ -679,7 +666,7 @@ def mostrar_simulacao_carteira(
                     a4.metric("Retirement age", f"{int(idade_apos)}")
 
 
-                # Histograma de A
+                # --- distribuição do aporte ---
                 ha, ba = np.histogram(A_valid, bins=50, density=True)
                 xa = (ba[:-1] + ba[1:]) / 2.0
                 fig_A = go.Figure()
@@ -689,6 +676,8 @@ def mostrar_simulacao_carteira(
                     xaxis_title="Annual contribution (€)", yaxis_title="Density"
                 )
                 st.plotly_chart(fig_A, use_container_width=True)
+            else:
+                st.info("No contribution values available (check target and factors).")
 
                 # Evolution of reserve until retirement
                 G_med = np.median(fatores_anuais, axis=1)
