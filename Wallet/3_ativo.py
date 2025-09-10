@@ -16,7 +16,7 @@ def carregar_universo(path="dados/ativos_totais.xlsx"):
 
 def mostrar_kpis_preco(dados: pd.DataFrame, ticker: str, info: dict | None):
     """Exibe 8 KPIs em caixinhas (st.metric) com labels em inglês, 2 linhas x 4 colunas."""
-    st.subheader("📌 Visão Geral do Preço")
+    st.subheader("📌 Price Overview", divider='blue')
 
     if dados.empty:
         st.info("Sem dados para mostrar KPIs.")
@@ -96,19 +96,7 @@ def mostrar_detalhes_fundamentalistas(
     tipo_ativo: str | None = None,
     dados_preco: pd.DataFrame | None = None
 ):
-    """
-    Exibe '📊 Fundamental Details' sem expander.
-    - STOCK: blocos fundamentalistas clássicos.
-    - ETF: perfil de ETF (categoria, AUM, NAV, expense ratio, retornos).
-    - INDEX: snapshot quantitativo a partir de preços (1M/3M/6M/1Y, vol 1Y, 52W range, MDD).
-    Labels em inglês.
-    """
-    import numpy as np
-    import pandas as pd
-    import yfinance as yf
-    import streamlit as st
-
-    # --- Helpers locais ---
+ # --- Helpers locais ---
     def _epoch_to_date_txt(v):
         try:
             if v is None or (isinstance(v, float) and np.isnan(v)):
@@ -163,7 +151,7 @@ def mostrar_detalhes_fundamentalistas(
 
     tipo = _inferir_tipo(info)
 
-    st.subheader("📊 Fundamental Details")
+    st.subheader("📊 Fundamental Details", divider='blue')
 
     if tipo == "STOCK":
         # ======================= STOCK =======================
@@ -334,7 +322,7 @@ def plot_combined_chart(df, symbol, sma_values=None, macd=None, signal=None):
 # ---------------------------------------------------------------------
 def mostrar_grafico_tecnico(ticker: str, dados: pd.DataFrame):
     """Calcula indicadores técnicos e mostra o gráfico do ativo."""
-    st.subheader("📊 Gráfico Técnico")
+    st.subheader("📊 Technical Chart", divider='blue')
 
     df = dados.copy()
 
@@ -391,7 +379,7 @@ import plotly.graph_objects as go
 
 def mostrar_metricas_performance(metricas: dict):
     """Exibe métricas de performance e gráfico de retorno acumulado com Plotly."""
-    st.subheader("📊 Performance Analysis")
+    st.subheader("📊 Performance Analysis", divider='blue')
 
     col1, col2, col3, col4 = st.columns(4)
 
@@ -433,40 +421,205 @@ def mostrar_metricas_performance(metricas: dict):
 
 # ---------------------------------------------------------------------
 
+from statsmodels.tsa.arima.model import ARIMA
+from arch.univariate import ConstantMean, GARCH, Normal
+import numpy as np
+import pandas as pd
+
+import yfinance as yf
+import pandas as pd
+import numpy as np
+
+def carregar_dados_simulacao(ticker: str, data_inicio, data_fim, frequencia: str = "1d") -> pd.DataFrame:
+    require = yf.Ticker(ticker)
+    data = require.history(start=data_inicio, end=data_fim)
+
+    if data.empty:
+        return data
+    
+    # 3. Busca dados intraday bem recentes (últimos 2 dias, intervalo de 1 minuto)
+    bd = require.history(period="2d", interval='1m')
+
+    if bd.empty:
+        return data
+
+    # 4. Compara as datas e concatena se necessário
+    if data.index[-1].date() != bd.index[-1].date():
+        data = pd.concat([data, bd.tail(1)])
+        
+    return data
+
+def modelo_garch(dataset):
+    """
+    Ajusta um modelo ARMA(9,10) para a média dos retornos
+    e um GARCH(2,1) para a volatilidade dos resíduos.
+    Retorna um DataFrame com histórico, fitted e previsões.
+    """
+    # --- Preparação da série ---
+    series_retornos = dataset['Close'].pct_change().dropna()
+    preco_inicial = dataset['Close'].iloc[-1]
+
+    # --- Ajuste do ARMA ---
+    ordem = (9, 0, 10)  # parâmetros p,d,q
+    modelo_arma = ARIMA(series_retornos, order=ordem).fit()
+
+    # Resíduos do ARMA
+    residuos = modelo_arma.resid
+
+    # --- Ajuste do GARCH ---
+    media_constante = ConstantMean(residuos)
+    media_constante.volatility = GARCH(p=2, q=1)
+    media_constante.distribution = Normal()
+    modelo_garch = media_constante.fit(disp="off")
+
+    # --- Previsões ---
+    horizonte = 10
+    previsao_var = modelo_garch.forecast(horizon=horizonte).variance.values[-1]
+    previsao_media = modelo_arma.forecast(steps=horizonte)
+
+    # Simulação de retornos previstos
+    choques = np.random.normal(0, previsao_var)
+    retornos_proj = previsao_media + previsao_var * choques
+
+    # --- Conversão para preços futuros ---
+    precos_proj = [preco_inicial]
+    for r in retornos_proj:
+        precos_proj.append(precos_proj[-1] * (1 + r))
+    precos_proj = np.array(precos_proj[1:])
+
+    # --- Reconstrução fitted ---
+    fitted_arma = modelo_arma.fittedvalues
+    vol_garch = modelo_garch.conditional_volatility
+    ruído_fitted = np.random.normal(0, vol_garch)
+    retornos_fitted = fitted_arma + vol_garch * ruído_fitted
+
+    fitted_precos = [dataset['Close'].iloc[0]]
+    for i in range(len(retornos_fitted)):
+        fitted_precos.append(dataset['Close'].iloc[i] * (1 + retornos_fitted[i]))
+
+    # --- DataFrame de saída ---
+    historico = pd.DataFrame({
+        'Date': dataset.index,
+        'Close': dataset['Close'],
+        'Open': dataset['Open'],
+        'High': dataset['High'],
+        'Low': dataset['Low'],
+        'Fitted': np.array(fitted_precos),
+        'Predict': np.full(len(dataset.index), np.nan)
+    })
+
+    # Datas futuras
+    ult_data = pd.to_datetime(dataset.index[-1])
+    datas_futuras = pd.bdate_range(ult_data + pd.DateOffset(1), periods=horizonte)
+
+    previsoes = pd.DataFrame({
+        'Date': datas_futuras,
+        'Close': np.nan,
+        'Open': np.nan,
+        'High': np.nan,
+        'Low': np.nan,
+        'Fitted': np.nan,
+        'Predict': precos_proj
+    })
+
+    resultado_final = pd.concat([historico, previsoes], ignore_index=True)
+    resultado_final['Date'] = pd.to_datetime(resultado_final['Date'])
+
+    return resultado_final
 
 
 
+
+import plotly.graph_objects as go
+from sklearn.metrics import mean_absolute_percentage_error
+
+def mostrar_resultados_simulacao(data_raw: pd.DataFrame,resultado_final: pd.DataFrame,ticker: str,moeda: str = "$",ultimos: int = 360):
     
-    
-    
+    # -------- Preparos comuns --------
+    base_resultados = resultado_final.copy()
+    base_resultados["Date"] = pd.to_datetime(base_resultados["Date"])
+    base_resultados = base_resultados.sort_values("Date", ascending=False)
+
+    # Para o MAPE (usa fitted in-sample)
+    df_limpo = base_resultados[["Date", "Close", "Fitted"]].dropna().copy()
+    mape = mean_absolute_percentage_error(df_limpo["Close"], df_limpo["Fitted"]) if not df_limpo.empty else 0.0
+
+    # Para o gráfico de previsão
+    base_filtrada = base_resultados.head(ultimos).copy()
+
+    # -------- Gráfico Previsão vs. Real --------
+    st.subheader(f"Forecast vs. Actual - Accuracy {(1 - mape):.2%}", divider='blue')
+
+    fig_previsao = go.Figure()
+    # Real
+    fig_previsao.add_trace(go.Scatter(
+        x=base_filtrada['Date'],
+        y=base_filtrada['Close'],
+        mode='lines',
+        name='Actual Price',
+        hovertemplate=f'{moeda} %{{y:,.2f}}<extra></extra>'
+    ))
+    # Estimado (fitted)
+    fig_previsao.add_trace(go.Scatter(
+        x=base_filtrada['Date'],
+        y=base_filtrada['Fitted'],
+        mode='lines',
+        name='Fitted (in-sample)',
+        line=dict(color='green', dash='dot'),
+        hovertemplate=f'{moeda} %{{y:,.2f}}<extra></extra>'
+    ))
+    # Previsto (out-of-sample)
+    fig_previsao.add_trace(go.Scatter(
+        x=base_filtrada['Date'],
+        y=base_filtrada['Predict'],
+        mode='lines',
+        name='Forecast (out-of-sample)',
+        line=dict(color='red', dash='dot'),
+        hovertemplate=f'{moeda} %{{y:,.2f}}<extra></extra>'
+    ))
+
+    fig_previsao.update_layout(
+        title="Price Forecast using ARMA(9,10)-GARCH(2,1)",
+        xaxis_title="Date",
+        yaxis_title=f"Price ({moeda})",
+        hovermode='x unified',
+        xaxis_hoverformat='%d/%m/%Y'
+    )
+    st.plotly_chart(fig_previsao, use_container_width=True)
+
+    return mape
+
 # ---------------------------------------------------------------------
 # Página principal
-st.set_page_config(page_title="Análise de Ativo", layout="wide")
-st.title("🔎 Análise Individual de Ativo")
+st.set_page_config(page_title="Stock Analysis", layout="wide")
+st.title("📈 Stock Analysis")
 
 # Sidebar de filtros
-st.sidebar.header("Configurações do Ativo")
+st.sidebar.header("Asset Settings")
 universo = carregar_universo()
 
 tipos = sorted(universo.get("Categoria Original", pd.Series()).dropna().unique().tolist())
-tipo_escolhido = st.sidebar.selectbox("Categoria Original", tipos)
+tipo_escolhido = st.sidebar.selectbox("Original Category", tipos)
 dados_filtrados = universo[universo["Categoria Original"] == tipo_escolhido]
 
 for coluna in ["País", "Setor", "Indústria"]:
     if coluna in dados_filtrados.columns:
         opcoes = sorted(dados_filtrados[coluna].dropna().unique())
         if len(opcoes) > 1:
-            escolha = st.sidebar.selectbox(coluna, ["Todos"] + opcoes, key=f"filtro_{coluna}")
-            if escolha != "Todos":
+            # Tradução das labels visíveis
+            label_map = {"País": "Country", "Setor": "Sector", "Indústria": "Industry"}
+            escolha = st.sidebar.selectbox(label_map[coluna], ["All"] + opcoes, key=f"filtro_{coluna}")
+            if escolha != "All":
                 dados_filtrados = dados_filtrados[dados_filtrados[coluna] == escolha]
 
 nomes_para_tickers = dados_filtrados.set_index("Nome Curto")["Ticker"].dropna().to_dict()
-nome_escolhido = st.sidebar.selectbox("Ativo", list(nomes_para_tickers.keys()))
+nome_escolhido = st.sidebar.selectbox("Asset", list(nomes_para_tickers.keys()))
 ticker = nomes_para_tickers[nome_escolhido]
 
-anos = st.sidebar.slider("Horizonte (anos)", 1, 20, 10)
-frequencia = st.sidebar.selectbox("Frequência", ["1d", "1wk", "1mo"])
-btn = st.sidebar.button("🔍 Analisar Ativo")
+anos = st.sidebar.slider("Horizon (years)", 1, 20, 10)
+frequencia = st.sidebar.selectbox("Frequency", ["1d", "1wk", "1mo"])
+btn = st.sidebar.button("🔍 Analyze Asset")
+
 
 # ---------------------------------------------------------------------
 # Execução ao clicar no botão
@@ -480,7 +633,7 @@ if btn and ticker:
     df_precos = dados[["Close"]].dropna()
 
     if dados.empty:
-        st.warning("⚠️ Nenhum dado encontrado para esse ativo e período.")
+        st.warning("⚠️ No data found for this selection.")
     else:
         tk = yf.Ticker(ticker)
         info = getattr(tk, "info", {}) or {}
@@ -490,7 +643,16 @@ if btn and ticker:
         metricas = calcular_metricas_performance(dados)
         mostrar_metricas_performance(metricas)
 
-       
+        data = carregar_dados_simulacao(ticker, data_inicio, data_fim)   # ou carregar_dados(...)
+        resultado_final = modelo_garch(data)                                          # teu return resultado_final
+        mape = mostrar_resultados_simulacao(data_raw=data,
+                                        resultado_final=resultado_final,
+                                        ticker=ticker,
+                                        moeda=("$" if ticker.endswith(".SA") else "$"),
+                                        ultimos=360)
+
+
+
 
     with st.expander("🔍 Ver dados brutos"):
             st.dataframe(dados.tail())
