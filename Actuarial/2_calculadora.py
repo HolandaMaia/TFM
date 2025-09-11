@@ -66,7 +66,7 @@ def calcular_reserva(df_mortalidade, local, idade_atual, idade_apos, renda_mensa
 
 # --- Função de visualização ---
 def mostrar_resultado(res, idade_atual, idade_apos, taxa_juros, regiao, df_regiao):
-    st.markdown(f"### 📌 Region Statistics - {regiao}")
+    st.subheader(f" 🌍 Region Statistics - {regiao}", divider='blue')
     col4, col5, col6 = st.columns(3)
 
     # idade onde idade e expectativa de vida se cruzam
@@ -99,7 +99,7 @@ def mostrar_resultado(res, idade_atual, idade_apos, taxa_juros, regiao, df_regia
     col_g1, col_g2 = st.columns([2, 1])
     
     with col_g1:
-        st.markdown("**📈 Life Expectancy**")
+        st.subheader("📈 Life Expectancy")
         df_plot = df_regiao[['idade', 'ex']].rename(columns={
             'idade': 'Age',
             'ex': 'Life Expectancy'
@@ -113,7 +113,7 @@ def mostrar_resultado(res, idade_atual, idade_apos, taxa_juros, regiao, df_regia
         st.plotly_chart(fig1, use_container_width=True)
 
     with col_g2:
-        st.markdown("**🏛️ Age Pyramid of Survival**")
+        st.subheader("🏛️ Age Pyramid of Survival")
         df_piramide = df_regiao[['idade', 'lx']].rename(columns={
         'idade': 'Age',
         'lx': 'Survivors'
@@ -128,7 +128,7 @@ def mostrar_resultado(res, idade_atual, idade_apos, taxa_juros, regiao, df_regia
     )
         st.plotly_chart(fig2, use_container_width=True)
 
-    st.markdown("### 🧮 Simulation Results")
+    st.subheader("🧮 Simulation Results", divider='blue')
     col1, col2, col3 = st.columns(3)
     col1.metric("Current Reserve", f"{res['reserva_hoje']:,.2f}")
     col2.metric("Retirement Reserve", f"{res['reserva_aposentadoria']:,.2f}")

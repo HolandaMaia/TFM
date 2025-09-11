@@ -83,7 +83,7 @@ def mostrar_kpis(metrics):
 #----------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 def mostrar_performance(dados, pesos):
-    st.subheader("Historical Performance")
+    st.subheader("Historical Performance", divider='blue')
     returns = np.log(dados / dados.shift(1)).dropna()
     carteira = (1 + returns.dot(pesos)).cumprod()
     drawdown = carteira / carteira.cummax() - 1
@@ -139,7 +139,7 @@ def mostrar_fronteira(dados, pesos):
 #----------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 def mostrar_tabela_ativos(dados, pesos):
-    st.subheader("Asset Breakdown")
+    st.subheader("Asset Breakdown", divider='blue')
     ultimo_preco = dados.ffill().iloc[-1]
     investimento = pesos * 1000  # hipotético
     unidades = investimento / ultimo_preco
@@ -205,7 +205,7 @@ def plot_combined_chart(df, symbol, sma_values=None, macd=None, signal=None):
 
 def mostrar_graficos_ativos(pesos, anos, frequencia):
     with st.expander(f"📊 Technical Analysis by Asset"):
-        st.subheader("📊 Technical Analysis by Asset")
+        st.subheader("📊 Technical Analysis by Asset", divider='blue')
 
         # Definir fechas
         fecha_fin = pd.Timestamp.today()
@@ -253,7 +253,7 @@ def mostrar_graficos_ativos(pesos, anos, frequencia):
 #----------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 def mostrar_benchmark_simples(dados, pesos, benchmark_ticker, anos=10):
-    st.subheader("📊 Benchmark Historical Analysis")
+    st.subheader("📊 Benchmark Historical Analysis", divider='blue')
 
     if not benchmark_ticker:
         st.warning("⚠️ No benchmark selected.")
@@ -354,7 +354,7 @@ def mostrar_heatmap(dados):
 
 
 def mostrar_fronteira_heatmap(dados, pesos):
-    st.subheader("Efficient Frontier and Correlation")
+    st.subheader("Efficient Frontier and Correlation", divider='blue')
     col1, col2 = st.columns([3, 1])
     with col1:
         fig_front = mostrar_fronteira(dados, pesos)
@@ -634,7 +634,7 @@ def mostrar_simulacao_carteira(
             )
             A_valid = A_sem[np.isfinite(A_sem)]
 
-            st.markdown("### 💶 Required Annual Contribution (ignoring initial capital)")
+            st.markdown("### 💶 Required Annual Contribution")
             if A_valid.size > 0:
                 A_mediana = float(np.median(A_valid))
                 A_p5      = float(np.percentile(A_valid, 5))
@@ -676,8 +676,7 @@ def mostrar_simulacao_carteira(
                     xaxis_title="Annual contribution (€)", yaxis_title="Density"
                 )
                 st.plotly_chart(fig_A, use_container_width=True)
-            else:
-                st.info("No contribution values available (check target and factors).")
+            
 
                 # Evolution of reserve until retirement
                 G_med = np.median(fatores_anuais, axis=1)

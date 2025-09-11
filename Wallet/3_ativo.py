@@ -234,8 +234,7 @@ def mostrar_detalhes_fundamentalistas(
             st.markdown(f"**Beta (3Y):** {formatar_valor(info.get('beta3Year'), 'moeda')}")
             st.markdown(f"**Holdings Turnover:** {formatar_valor(info.get('annualHoldingsTurnover'), 'porcentagem')}")
 
-        st.caption("Nota: muitos ETFs no Yahoo não expõem a composição (holdings) pela API; para ver holdings pode ser necessário outra fonte.")
-
+        
     else:
         # ======================= INDEX =======================
         st.markdown("### 🧭 Index Snapshot (price-based)")
