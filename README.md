@@ -14,23 +14,33 @@ Unlike traditional approaches that separately analyze pension sufficiency or inv
 
 ## 🎯 Key Features
 
-- Actuarial reserve calculation using UN mortality tables
-- Portfolio optimization using historical financial data
-- Monte Carlo simulations for future projections
-- Interactive interface built with Streamlit
+
+- Financial data retrieval via Yahoo Finance
+- Time series modeling using ARIMA and GARCH
+- Interactive visualizations with Plotly
+- Portfolio optimization with PyPortfolioOpt
+- Actuarial modeling using pyliferisk
+- User-friendly interface built with Streamlit
 
 ---
 
 ## 🔍 Data Sources
 
-- **Mortality Tables**: United Nations (World Population Prospects, 2016–2023)
-- **Financial Data**: Yahoo Finance API (stocks, ETFs, indices)
-- **Technology Stack**:
-  - Python: `pandas`, `numpy`, `scikit-learn`
-  - Portfolio Optimization: `PyPortfolioOpt`
-  - Visualization: `plotly`
-  - Actuarial Modeling: `pyliferisk`
-  - UI: `Streamlit`
+- Mortality Tables: United Nations (World Population Prospects, 2016–2023)
+- Financial Data: Yahoo Finance API (stocks, ETFs, indices)
+---
+
+## Technologies and Libraries Used
+
+- Language: Python
+- Core Libraries:
+- Data Manipulation & Analysis: pandas, numpy
+- Visualization: plotly (including plotly.express and plotly.graph_objects), seaborn, matplotlib
+- User Interface: streamlit
+- Statistical & Time Series Modeling: statsmodels (ARIMA), arch (GARCH)
+- Evaluation Metrics: sklearn.metrics (MAPE)
+- Portfolio Optimization: PyPortfolioOpt
+- Actuarial Modeling: pyliferisk
 
 ---
 
