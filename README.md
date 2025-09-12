@@ -2,7 +2,7 @@
 # Modelo Integrado de Cálculo Actuarial y Optimización de Carteras para la Planificación de la Jubilación
 
 ![Streamlit](https://img.shields.io/badge/Streamlit-App-orange)
-![License](https://img.shields.io/badge/License-MIT-green)
+![License]([https://img.shields.io/badge/License-MIT-green](https://github.com/HolandaMaia/TFM/blob/master/LICENSE))
 
 This project is a practical simulation tool developed by Matheus Holanda Maia. It integrates actuarial modeling with investment portfolio optimization to answer a key financial planning question:
 
