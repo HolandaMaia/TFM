@@ -1,7 +1,6 @@
 
-# Ordenando el Ordenado
+# Modelo Integrado de Cálculo Actuarial y Optimización de Carteras para la Planificación de la Jubilación
 
-![Python](https://img.shields.io/badge/Python-3.9-blue)
 ![Streamlit](https://img.shields.io/badge/Streamlit-App-orange)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
