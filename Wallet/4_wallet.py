@@ -1,30 +1,33 @@
+
+
 import streamlit as st
 import pandas as pd
 import numpy as np
+import requests
 import yfinance as yf
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import seaborn as sns
 import matplotlib.pyplot as plt
-import yfinance as yf
-from plotly.subplots import make_subplots
-import plotly.graph_objects as go
-import numpy as np
-import pandas as pd
-import streamlit as st
 
 st.set_page_config(page_title="Wallet Dashboard", layout="wide")
 
 #----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# Função para carregar o universo de ativos diretamente do GitHub
 @st.cache_resource
-def carregar_universo(path="dados/ativos_totais.xlsx"):
-    # Carrega o universo de ativos a partir de um arquivo Excel
+def carregar_universo():
+    url = "https://raw.githubusercontent.com/HolandaMaia/TFM/master/dados/ativos_totais.xlsx"
     try:
-        df = pd.read_excel(path)
+        response = requests.get(url)
+        response.raise_for_status()  # Verifica se houve erro na requisição
+        df = pd.read_excel(response.content)
         return df
     except Exception as e:
-        st.error(f"Error loading asset database: {e}")  
+        st.error(f"Error loading asset database from GitHub: {e}")
         return pd.DataFrame()
+
+universo = carregar_universo()
 
 #----------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -70,14 +73,47 @@ def calcular_metricas(dados, pesos):
 
 def mostrar_kpis(metrics):
     retorno, vol, sharpe, drawdown, _n, desvio, acumulado = metrics
+
+    st.subheader("📊 Key Performance Indicators (KPIs)", divider='blue')
+    st.caption(
+        "These metrics provide insights into the performance and risk of your portfolio. Hover over the info icons for detailed explanations."
+    )
+
+    # Organize KPIs into two rows for better visual balance
     col1, col2, col3 = st.columns(3)
-    col1.metric("Expected Return", f"{retorno:.2%}")
-    col2.metric("Volatility", f"{vol:.2%}")
-    col3.metric("Sharpe Ratio", f"{sharpe:.2f}")
+    col1.metric(
+        "Expected Return",
+        f"{retorno:.2%}",
+        help="This is the average annual profit you might earn from your portfolio. It is based on historical data and helps you understand potential growth."
+    )
+    col2.metric(
+        "Volatility",
+        f"{vol:.2%}",
+        help="Volatility measures how much the portfolio's value goes up and down. Higher volatility means more risk, but also more potential reward."
+    )
+    col3.metric(
+        "Sharpe Ratio",
+        f"{sharpe:.2f}",
+        help="The Sharpe Ratio shows how much return you get for the risk you take. A higher ratio means better risk-adjusted performance."
+    )
+
     col4, col5, col6 = st.columns(3)
-    col4.metric("Max Drawdown", f"{drawdown:.2%}")
-    col5.metric("Standard Deviation", f"{desvio:.2%}")
-    col6.metric("Cumulative Return", f"{acumulado:.2%}")
+    col4.metric(
+        "Max Drawdown",
+        f"{drawdown:.2%}",
+        help="This is the largest drop in your portfolio's value from its highest point. It shows the worst loss you could have experienced."
+    )
+    col5.metric(
+        "Standard Deviation",
+        f"{desvio:.2%}",
+        help="Standard deviation measures how much the returns vary from the average. It helps you understand the consistency of returns."
+    )
+    col6.metric(
+        "Cumulative Return",
+        f"{acumulado:.2%}",
+        help="Cumulative return is the total profit or loss over the entire period. It shows how much your portfolio has grown overall."
+    )
+
 
 
 #----------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -89,74 +125,92 @@ def mostrar_performance(dados, pesos):
     drawdown = carteira / carteira.cummax() - 1
 
     col1, col2 = st.columns([3, 1])
-    fig_ret = px.area(
-    x=carteira.index,
-    y=((carteira - 1) * 100),  # transforma em %
-    title="Cumulative Return (%)")
-    fig_ret.update_layout(
-    xaxis_title=None,
-    yaxis_title=None,
-    height=400)
-    fig_ret.update_yaxes(ticksuffix="%")
-    col1.plotly_chart(fig_ret, use_container_width=True)
+    with col1:
+        st.subheader(
+            "📈 Portfolio Cumulative Return",
+            help="This chart displays the cumulative return of your portfolio over time. The x-axis represents the time period, and the y-axis shows the cumulative return as a percentage. It helps you track the overall growth of your portfolio."
+        )
+        fig_ret = px.area(
+            x=carteira.index,
+            y=((carteira - 1) * 100),  # transforma em %
+            labels={"x": "Date", "y": "Cumulative Return (%)"},
+            title="Portfolio Cumulative Return"
+        )
+        fig_ret.update_layout(
+            xaxis=dict(showgrid=True),
+            yaxis=dict(showgrid=True),
+            hovermode="x unified",
+            height=400
+        )
+        st.plotly_chart(fig_ret, use_container_width=True)
 
-    fig_dd = px.area(
-    x=drawdown.index,
-    y=drawdown,
-    title="Drawdown")
+    with col2:
+        st.subheader(
+            "📉 Portfolio Drawdown",
+            help="This chart shows the drawdown of your portfolio over time. The x-axis represents the time period, and the y-axis shows the drawdown as a percentage. It helps you understand the maximum loss from the portfolio's peak value."
+        )
+        fig_dd = px.area(
+            x=drawdown.index,
+            y=drawdown,
+            labels={"x": "Date", "y": "Drawdown (%)"},
+            title="Portfolio Drawdown"
+        )
+        fig_dd.update_layout(
+            xaxis=dict(showgrid=True),
+            yaxis=dict(showgrid=True),
+            hovermode="x unified",
+            height=400
+        )
+        st.plotly_chart(fig_dd, use_container_width=True)
 
-    fig_dd.update_yaxes(tickformat=".0%", title=None)
-    fig_dd.update_layout(xaxis_title=None)
-
-    col2.plotly_chart(fig_dd, use_container_width=True)
-
-
-#----------------------------------------------------------------------------------------------------------------------------------------------------------------------
-
-def mostrar_fronteira(dados, pesos):
-    returns = np.log(dados / dados.shift(1)).dropna()
-    mu = returns.mean() * 252
-    cov = returns.cov() * 252
-    n_port = 300
-    results = np.zeros((3, n_port))
-    for i in range(n_port):
-        w = np.random.random(len(mu))
-        w /= np.sum(w)
-        port_ret = np.dot(w, mu)
-        port_vol = np.sqrt(w.T @ cov @ w)
-        results[0, i] = port_vol
-        results[1, i] = port_ret
-        results[2, i] = port_ret / port_vol if port_vol else 0
-    fig = px.scatter(x=results[0], y=results[1], color=results[2],
-                    labels={"x": "Volatility", "y": "Return"},
-                    title="Markowitz Frontier")
-    carteira_ret = np.dot(pesos, mu)
-    carteira_vol = np.sqrt(pesos.values.T @ cov.values @ pesos.values)
-    fig.add_trace(go.Scatter(x=[carteira_vol], y=[carteira_ret], mode="markers",
-                            marker=dict(color="red", size=10), name="Wallet"))
-    return fig
 
 #----------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-def mostrar_tabela_ativos(dados, pesos):
+def mostrar_tabela_ativos(dados, pesos, nomes_para_tickers):
     st.subheader("Asset Breakdown", divider='blue')
+    st.caption(
+        "This section provides a detailed breakdown of your portfolio's assets. "
+        "The table includes asset names, weights, current prices, units held, invested values, "
+        "and percentage changes over different time periods (24h, 7d, 1m). These numbers are "
+        "calculated based on the latest available data and the weights assigned to each asset."
+    )
+
+    # Mapear nomes dos ativos usando os nomes completos selecionados no menu
+    nomes_ativos = [next((nome for nome, tck in nomes_para_tickers.items() if tck == ticker), ticker) for ticker in dados.columns]
     ultimo_preco = dados.ffill().iloc[-1]
     investimento = pesos * 1000  # hipotético
     unidades = investimento / ultimo_preco
     var_1d = dados.pct_change().iloc[-1]
     var_7d = dados.pct_change(7).iloc[-1]
     var_1m = dados.pct_change(21).iloc[-1]
+
+    # Adicionar setas para variações
+    def format_variation(value):
+        if value > 0:
+            return f"↑ {value:.2f}%"
+        elif value < 0:
+            return f"↓ {value:.2f}%"
+        else:
+            return f"→ {value:.2f}%"
+
     tabela = pd.DataFrame({
-        "Ticker": pesos.index,
-        "Weight (%)": (pesos * 100).round(2),
-        "Current Price": ultimo_preco.round(2),
-        "Units": unidades.round(2),
-        "Invested Value": investimento.round(2),
-        "24h Change (%)": (var_1d * 100).round(2),
-        "7d Change (%)": (var_7d * 100).round(2),
-        "1m Change (%)": (var_1m * 100).round(2),
+        "Asset Name": nomes_ativos,
+        "Weight (%)": pesos * 100,
+        "Current Price": ultimo_preco,
+        "Units": unidades,
+        "Invested Value": investimento,
+        "24h Change (%)": var_1d.apply(format_variation),
+        "7d Change (%)": var_7d.apply(format_variation),
+        "1m Change (%)": var_1m.apply(format_variation),
     })
-    st.dataframe(tabela, use_container_width=True)
+
+    # Usar st.dataframe com formatação personalizada
+    st.dataframe(tabela.style.format({
+        "Weight (%)": "{:.2f}",
+        "Current Price": "{:.2f}",
+        "Units": "{:.2f}",
+        "Invested Value": "{:.2f}",
+    }), use_container_width=True)
 
 #----------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -203,61 +257,122 @@ def plot_combined_chart(df, symbol, sma_values=None, macd=None, signal=None):
 
     return fig
 
-def mostrar_graficos_ativos(pesos, anos, frequencia):
-    with st.expander(f"📊 Technical Analysis by Asset"):
-        st.subheader("📊 Technical Analysis by Asset", divider='blue')
+def mostrar_graficos_ativos(pesos, anos, frequencia, nomes_para_tickers):
+    st.subheader("📊 Technical Analysis by Asset", divider='blue')
+    st.caption(
+        "Explore detailed technical analysis for each asset in your portfolio. "
+        "The charts include candlestick patterns, moving averages (SMA20, SMA50), and MACD indicators. "
+        "These tools help you identify trends, momentum, and potential buy/sell signals."
+    )
 
-        # Definir fechas
-        fecha_fin = pd.Timestamp.today()
-        fecha_inicio = fecha_fin - pd.DateOffset(years=anos)
+    # Definir datas
+    data_fim = pd.Timestamp.today()
+    data_inicio = data_fim - pd.DateOffset(years=anos)
 
-        # Descargar datos OHLC
-        tickers = list(pesos.index)
-        datos_ohlc = yf.download(
-            tickers,
-            start=fecha_inicio,
-            end=fecha_fin,
-            interval=frequencia,
-            auto_adjust=False,
-            group_by='ticker'
-        )
+    # Baixar dados OHLC
+    tickers = list(pesos.index)
+    dados_ohlc = yf.download(
+        tickers,
+        start=data_inicio,
+        end=data_fim,
+        interval=frequencia,
+        auto_adjust=False,
+        group_by='ticker'
+    )
 
-        for ticker in tickers:
-            if ticker not in datos_ohlc.columns.levels[0]:
-                st.warning(f"❗ Data not available for {ticker}")
-                continue
+    for ticker in tickers:
+        asset_name = next((nome for nome, tck in nomes_para_tickers.items() if tck == ticker), ticker)
 
-            df = datos_ohlc[ticker].dropna().copy()
-            df = df.rename(columns=str.lower)
-            df['date'] = df.index
+        if ticker not in dados_ohlc.columns.levels[0]:
+            st.warning(f"❗ Data not available for {asset_name}")
+            continue
 
-            if df.empty or df[['open', 'high', 'low', 'close']].isna().all().any():
-                st.warning(f"❗ Data not available for {ticker}")
-                continue
+        df = dados_ohlc[ticker].dropna().copy()
+        df = df.rename(columns=str.lower)
+        df['date'] = df.index
 
-            # Indicadores
-            sma_values = {
-                20: df['close'].rolling(window=20).mean(),
-                50: df['close'].rolling(window=50).mean()
-            }
-            ema12 = df['close'].ewm(span=12, adjust=False).mean()
-            ema26 = df['close'].ewm(span=26, adjust=False).mean()
-            macd = ema12 - ema26
-            signal = macd.ewm(span=9, adjust=False).mean()
+        if df.empty or df[['open', 'high', 'low', 'close']].isna().all().any():
+            st.warning(f"❗ Data not available for {asset_name}")
+            continue
 
-            # Gráfico
-            fig = plot_combined_chart(df, ticker, sma_values=sma_values, macd=macd, signal=signal)
+        # Indicadores
+        sma_values = {
+            20: df['close'].rolling(window=20).mean(),
+            50: df['close'].rolling(window=50).mean()
+        }
+        ema12 = df['close'].ewm(span=12, adjust=False).mean()
+        ema26 = df['close'].ewm(span=26, adjust=False).mean()
+        macd = ema12 - ema26
+        signal = macd.ewm(span=9, adjust=False).mean()
+
+        # Gráfico
+        with st.expander(f"📈 {asset_name} - Technical Analysis"):
+            fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3])
+
+            fig.add_trace(go.Candlestick(
+                x=df['date'],
+                open=df['open'],
+                high=df['high'],
+                low=df['low'],
+                close=df['close'],
+                name=f"{asset_name}"
+            ), row=1, col=1)
+
+            colors = ['blue', 'orange']
+            for i, (window, sma) in enumerate(sma_values.items()):
+                fig.add_trace(go.Scatter(
+                    x=df['date'],
+                    y=sma,
+                    mode='lines',
+                    name=f'SMA {window}',
+                    line=dict(width=2, color=colors[i % len(colors)])
+                ), row=1, col=1)
+
+            histogram = macd - signal
+            fig.add_trace(go.Scatter(x=df['date'], y=macd, mode='lines', name='MACD Line', line=dict(color='blue')), row=2, col=1)
+            fig.add_trace(go.Scatter(x=df['date'], y=signal, mode='lines', name='Signal Line', line=dict(color='orange')), row=2, col=1)
+            fig.add_trace(go.Bar(x=df['date'], y=histogram.where(histogram > 0), name='MACD Histogram +', marker_color='green', opacity=0.5), row=2, col=1)
+            fig.add_trace(go.Bar(x=df['date'], y=histogram.where(histogram < 0), name='MACD Histogram -', marker_color='red', opacity=0.5), row=2, col=1)
+
+            fig.update_layout(
+                title=f'{asset_name} - Candlestick + SMA + MACD',
+                xaxis_title='Date',
+                yaxis_title='Price',
+                xaxis2_title='Date',
+                yaxis2_title='MACD',
+                xaxis_rangeslider_visible=False,
+                height=600,
+                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
+            )
+
             st.plotly_chart(fig, use_container_width=True)
 
+            # Adicionar legenda explicativa
+            st.caption(
+                "- **Candlestick**: Shows the open, high, low, and close prices for each time period.\n"
+                "- **SMA20**: 20-day simple moving average, useful for identifying short-term trends.\n"
+                "- **SMA50**: 50-day simple moving average, useful for identifying medium-term trends.\n"
+                "- **MACD**: Moving Average Convergence Divergence, highlights momentum and trend direction.\n"
+                "- **Signal Line**: A 9-day EMA of the MACD, used to generate buy/sell signals.\n"
+                "- **Histogram**: Difference between MACD and Signal Line, shows momentum strength.\n"
+                "- **SMA Crossovers**: When SMA20 crosses above SMA50, it may indicate a bullish trend; crossing below may indicate a bearish trend."
+            )
         
 #----------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-def mostrar_benchmark_simples(dados, pesos, benchmark_ticker, anos=10):
+def mostrar_benchmark_simples(dados, pesos, benchmark_ticker, nomes_para_tickers, anos=10):
     st.subheader("📊 Benchmark Historical Analysis", divider='blue')
+    st.caption(
+        "Compare the historical performance of your portfolio against a selected benchmark. "
+        "This analysis helps you understand how your portfolio performs relative to a market index ou other reference asset."
+    )
 
     if not benchmark_ticker:
         st.warning("⚠️ No benchmark selected.")
         return
+
+    # Obter o nome completo do benchmark
+    benchmark_name = next((nome for nome, tck in nomes_para_tickers.items() if tck == benchmark_ticker), benchmark_ticker)
 
     data_fim = pd.Timestamp.today()
     data_inicio = data_fim - pd.DateOffset(years=anos)
@@ -298,26 +413,37 @@ def mostrar_benchmark_simples(dados, pesos, benchmark_ticker, anos=10):
     carteira_pct = carteira_pct.loc[datas_comuns]
 
     # 📉 Gráfico 1: Preço de Fechamento do Benchmark
-    st.markdown(f"### 💵 Price Evolution - `{benchmark_ticker}`")
+    st.markdown(
+        f"### 💵 Price Evolution - {benchmark_name}",
+        help="This chart shows the historical closing prices of the selected benchmark asset. It helps you understand the price trends over time."
+    )
     fig_close = px.line(
         x=close_series.index,
         y=close_series.values,
-        title="Closing Price",
+        title=f"{benchmark_name} - Closing Price",
         labels={"x": "Date", "y": "Price"}
     )
-    fig_close.update_yaxes(tickprefix="US$ ", title="Price")
+    fig_close.update_yaxes(title="Price")  # Removido o prefixo 'US$'
     fig_close.update_layout(height=400, showlegend=False)
+    fig_close.update_layout(
+        xaxis=dict(showgrid=True),
+        yaxis=dict(showgrid=True),
+        hovermode="x unified"
+    )
     st.plotly_chart(fig_close, use_container_width=True, key="grafico_preco_benchmark")
 
     # 📈 Gráfico 2: Retorno Acumulado (%)
-    st.markdown("### 📈 Cumulative Return (%) - Benchmark vs Portfolio")
+    st.markdown(
+        "### 📈 Cumulative Return (%) - Benchmark vs Portfolio",
+        help="This chart compares the cumulative returns of your portfolio and the selected benchmark. It shows how much each has grown over time."
+    )
     fig_ret = go.Figure()
 
     fig_ret.add_trace(go.Scatter(
         x=benchmark_ret_pct.index,
         y=benchmark_ret_pct.values,
         mode="lines",
-        name=benchmark_ticker,
+        name=benchmark_name,
         line=dict(color="royalblue")
     ))
 
@@ -325,7 +451,7 @@ def mostrar_benchmark_simples(dados, pesos, benchmark_ticker, anos=10):
         x=carteira_pct.index,
         y=carteira_pct.values,
         mode="lines",
-        name="Carteira",
+        name="Portfolio",
         line=dict(color="seagreen")
     ))
 
@@ -334,7 +460,23 @@ def mostrar_benchmark_simples(dados, pesos, benchmark_ticker, anos=10):
         height=400,
         xaxis_title="Date",
         title="Cumulative Return (%)",
-        legend_title="Series"
+        legend_title="Series",
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
+    )
+    # Adicionado anotações para destacar valores finais
+    fig_ret.add_annotation(
+        x=carteira_pct.index[-1],
+        y=carteira_pct.values[-1],
+        text="Portfolio End Value",
+        showarrow=True,
+        arrowhead=2
+    )
+    fig_ret.add_annotation(
+        x=benchmark_ret_pct.index[-1],
+        y=benchmark_ret_pct.values[-1],
+        text="Benchmark End Value",
+        showarrow=True,
+        arrowhead=2
     )
     st.plotly_chart(fig_ret, use_container_width=True, key="grafico_retorno_comparado")
 
@@ -342,6 +484,28 @@ def mostrar_benchmark_simples(dados, pesos, benchmark_ticker, anos=10):
 
 #----------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
+def mostrar_fronteira(dados, pesos):
+    returns = np.log(dados / dados.shift(1)).dropna()
+    mu = returns.mean() * 252
+    cov = returns.cov() * 252
+    n_port = 300
+    results = np.zeros((3, n_port))
+    for i in range(n_port):
+        w = np.random.random(len(mu))
+        w /= np.sum(w)
+        port_ret = np.dot(w, mu)
+        port_vol = np.sqrt(w.T @ cov @ w)
+        results[0, i] = port_vol
+        results[1, i] = port_ret
+        results[2, i] = port_ret / port_vol if port_vol else 0
+    fig = px.scatter(x=results[0], y=results[1], color=results[2],
+                    labels={"x": "Volatility", "y": "Return"},
+                    title="Markowitz Frontier")
+    carteira_ret = np.dot(pesos, mu)
+    carteira_vol = np.sqrt(pesos.values.T @ cov.values @ pesos.values)
+    fig.add_trace(go.Scatter(x=[carteira_vol], y=[carteira_ret], mode="markers",
+                            marker=dict(color="red", size=10), name="Wallet"))
+    return fig
 
 def mostrar_heatmap(dados):
     corr = dados.pct_change().corr()
@@ -354,13 +518,27 @@ def mostrar_heatmap(dados):
 
 
 def mostrar_fronteira_heatmap(dados, pesos):
-    st.subheader("Efficient Frontier and Correlation", divider='blue')
+    st.subheader(
+        "Efficient Frontier and Correlation",divider='blue'
+    )
+    st.caption(
+        "The Efficient Frontier helps you visualize the best possible returns for a given level of risk, based on historical data. "
+        "The Correlation Matrix provides insights into how asset returns move in relation to each other, which is crucial for diversification."
+    )
+
     col1, col2 = st.columns([3, 1])
     with col1:
         fig_front = mostrar_fronteira(dados, pesos)
-        st.plotly_chart(fig_front, use_container_width=True)
+        st.plotly_chart(
+            fig_front,
+            use_container_width=True,
+            help="The Markowitz Frontier visualizes the trade-off between risk (volatility) and return for different portfolio allocations."
+        )
     with col2:
-        st.markdown("**Correlation Matrix**")
+        st.markdown(
+            "**Correlation Matrix**",
+            help="The Correlation Matrix shows how the returns of different assets are related. Values close to 1 indicate strong positive correlation, while values close to -1 indicate strong negative correlation."
+        )
         fig_heat = mostrar_heatmap(dados)
         st.pyplot(fig_heat, use_container_width=True)
 
@@ -368,8 +546,7 @@ def mostrar_fronteira_heatmap(dados, pesos):
 #----------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 # --- Monte Carlo da carteira: cálculo (corrigido para passo diário) ---
-import numpy as np
-import pandas as pd
+
 
 # --- Lê parâmetros da calculadora atuarial (se existirem) ---
 def obter_objetivo_atuarial():
@@ -438,7 +615,6 @@ def simular_monte_carlo_carteira(
         vol_a = sigma_d * np.sqrt(passos_por_ano)
         # Sharpe “histórico” aproximado (sem RF)
         sharpe_a = mu_a / vol_a if vol_a > 0 else np.nan
-        import streamlit as st
         st.write({
             "daily_log_mean": mu_d,
             "daily_log_std": sigma_d,
@@ -544,9 +720,7 @@ def mostrar_simulacao_carteira(
       - (Opcional) Distribuição do aporte anual necessário (se objetivo_reserva for passado)
     Labels em inglês; código e comentários em PT-BR.
     """
-    import numpy as np
-    import plotly.graph_objects as go
-    import streamlit as st
+
 
     # 1) Extrair dados da simulação
     p = resultado_mc["percentiles_df"]
@@ -562,163 +736,200 @@ def mostrar_simulacao_carteira(
     if not titulo:
         titulo = f"🔮 Monte Carlo Simulation ({n_anos} years)"
 
-    with st.expander(titulo, expanded=True):
+    # Subheader for Monte Carlo Simulation
+    st.subheader("🔮 Monte Carlo Simulation", help="Monte Carlo simulation helps estimate the potential future performance of your portfolio by simulating thousands of possible outcomes based on historical data.", divider='blue')
 
-        # 3) KPIs principais
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Median terminal (€)", f"{r['mediana_final']:,.0f}")
-        c2.metric("P5 terminal (€)",     f"{r['p5_final']:,.0f}")
-        c3.metric("P95 terminal (€)",    f"{r['p95_final']:,.0f}")
-        c4.metric("Loss probability",     f"{100*r['prob_perda']:.1f}%")
+    # Add caption below the subheader
+    st.caption(
+        "Monte Carlo Simulation provides a probabilistic approach to understanding potential portfolio outcomes. "
+        "By simulating thousands of scenarios with an initial investment of 1000 units, it helps investors assess risks, "
+        "identify potential returns, and make informed decisions based on a range of possible future states."
+    )
 
-        c5, c6, c7 = st.columns(3)
-        c5.metric("Median CAGR", f"{100*r['cagr_mediana']:.2f}%")
-        c6.metric("CAGR P5",     f"{100*r['cagr_p5']:.2f}%")
-        c7.metric("CAGR P95",    f"{100*r['cagr_p95']:.2f}%")
+    # 3) KPIs principais
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Median terminal ()", f"{r['mediana_final']:,.0f}", help="The median terminal value represents the middle value of all simulated portfolio outcomes at the end of the investment horizon.")
+    c2.metric("P5 terminal ()",     f"{r['p5_final']:,.0f}", help="The 5th percentile terminal value indicates the value below which only 5% of the simulated outcomes fall, representing a pessimistic scenario.")
+    c3.metric("P95 terminal ()",    f"{r['p95_final']:,.0f}", help="The 95th percentile terminal value indicates the value above which only 5% of the simulated outcomes fall, representing an optimistic scenario.")
+    c4.metric("Loss probability",     f"{100*r['prob_perda']:.1f}%", help="The probability of loss shows the likelihood of the portfolio ending with a value lower than the initial capital.")
 
-        # 4) Fan chart
-        fig_fan = go.Figure()
-        fig_fan.add_trace(go.Scatter(x=p["years"], y=p["p50"], mode="lines", name="Median"))
-        fig_fan.add_trace(go.Scatter(x=p["years"], y=p["p25"], mode="lines", name="P25", line=dict(dash="dash")))
-        fig_fan.add_trace(go.Scatter(x=p["years"], y=p["p75"], mode="lines", name="P75", line=dict(dash="dash")))
-        fig_fan.add_trace(go.Scatter(
-            x=np.concatenate([p["years"].values, p["years"].values[::-1]]),
-            y=np.concatenate([p["p95"].values, p["p05"].values[::-1]]),
-            fill="toself", name="P5–P95", mode="lines", line=dict(width=0), opacity=0.3
-        ))
-        fig_fan.update_layout(
-            title="Projected portfolio value (fan chart)",
-            xaxis_title="Years", yaxis_title="Value (€)", hovermode="x unified"
+    c5, c6, c7 = st.columns(3)
+    c5.metric("Median CAGR", f"{100*r['cagr_mediana']:.2f}%", help="The median Compound Annual Growth Rate (CAGR) represents the typical annualized return of the portfolio over the investment horizon.")
+    c6.metric("CAGR P5",     f"{100*r['cagr_p5']:.2f}%", help="The 5th percentile CAGR represents a pessimistic annualized return scenario.")
+    c7.metric("CAGR P95",    f"{100*r['cagr_p95']:.2f}%", help="The 95th percentile CAGR represents an optimistic annualized return scenario.")
+
+    # Fan chart
+    st.markdown(
+        "### Projected Portfolio Value (Fan Chart)",
+        help="The fan chart illustrates the range of possible portfolio values over time, with percentiles showing the uncertainty in projections."
+    )
+    fig_fan = go.Figure()
+    fig_fan.add_trace(go.Scatter(x=p["years"], y=p["p50"], mode="lines", name="Median"))
+    fig_fan.add_trace(go.Scatter(x=p["years"], y=p["p25"], mode="lines", name="P25", line=dict(dash="dash")))
+    fig_fan.add_trace(go.Scatter(x=p["years"], y=p["p75"], mode="lines", name="P75", line=dict(dash="dash")))
+    fig_fan.add_trace(go.Scatter(
+        x=np.concatenate([p["years"].values, p["years"].values[::-1]]),
+        y=np.concatenate([p["p95"].values, p["p05"].values[::-1]]),
+        fill="toself", name="P5–P95", mode="lines", line=dict(width=0), opacity=0.3
+    ))
+    fig_fan.update_layout(
+        xaxis_title="Years", yaxis_title="Value ()", hovermode="x unified"
+    )
+    st.plotly_chart(fig_fan, use_container_width=True)
+    st.caption("This chart provides a probabilistic view of your portfolio's future value. The shaded area represents the range between the 5th and 95th percentiles, helping you understand the potential risks and rewards.")
+
+    # PDF do CAGR
+    st.markdown(
+        "### CAGR Distribution (Annualized)",
+        help="This chart shows the distribution of annualized returns (CAGR) from the simulation, helping you assess the likelihood of different growth rates."
+    )
+    hist_vals, bins = np.histogram(cagr, bins=60, density=True)
+    xmid = (bins[:-1] + bins[1:]) / 2.0
+    fig_pdf = go.Figure()
+    fig_pdf.add_trace(go.Bar(x=xmid, y=hist_vals, opacity=0.7, name="Density"))
+    fig_pdf.update_layout(
+        xaxis_title="CAGR", yaxis_title="Density"
+    )
+    st.plotly_chart(fig_pdf, use_container_width=True)
+    st.caption("The CAGR distribution chart helps you understand the range and likelihood of annualized returns for your portfolio, based on the simulation.")
+
+    # 6) Histograma do retorno terminal
+    st.markdown(
+        "### Terminal Return Distribution",
+        help="This chart shows the distribution of terminal returns from the simulation, helping you assess the likelihood of different outcomes."
+    )
+    ret_final = vt / capital_inicial - 1.0
+    h2, b2 = np.histogram(ret_final, bins=60, density=True)
+    x2 = (b2[:-1] + b2[1:]) / 2.0
+    fig_hist = go.Figure()
+    fig_hist.add_trace(go.Bar(x=x2, y=h2, opacity=0.7, name="Density"))
+    fig_hist.update_layout(
+        xaxis_title="Terminal Return (%)",
+        yaxis_title="Density"
+    )
+    st.plotly_chart(fig_hist, use_container_width=True)
+    st.caption("The terminal return distribution chart provides insights into the range of possible returns at the end of the investment period. It highlights the most likely outcomes and helps you understand the variability of potential returns.")
+
+    # 7) CDF empírica
+    st.markdown(
+        "### Cumulative Distribution (Terminal Return)",
+        help="This chart illustrates the cumulative probability of terminal returns from the simulation. It helps you understand the likelihood of achieving or exceeding specific return levels."
+    )
+    orden = np.sort(ret_final)
+    cdf = np.linspace(0, 1, len(orden))
+    fig_cdf = go.Figure()
+    fig_cdf.add_trace(go.Scatter(x=orden, y=cdf, mode="lines", name="CDF"))
+    fig_cdf.update_layout(
+        xaxis_title="Terminal Return", yaxis_title="Cumulative Probability"
+    )
+    st.plotly_chart(fig_cdf, use_container_width=True)
+    st.caption("The cumulative distribution chart provides a probabilistic view of terminal returns, showing the likelihood of achieving or exceeding specific outcomes at the end of the investment period.")
+
+
+    # 8) Aporte anual (modelo 2: ignorar capital inicial)
+    if objetivo_reserva is not None and np.isfinite(objetivo_reserva) and fatores_anuais is not None:
+        A_sem = calcular_aporte_anual_sem_capital(
+            fatores_anuais=fatores_anuais,
+            FV_objetivo=float(objetivo_reserva)
         )
-        st.plotly_chart(fig_fan, use_container_width=True)
+        A_valid = A_sem[np.isfinite(A_sem)]
 
-        # 5) PDF do CAGR
-        hist_vals, bins = np.histogram(cagr, bins=60, density=True)
-        xmid = (bins[:-1] + bins[1:]) / 2.0
-        fig_pdf = go.Figure()
-        fig_pdf.add_trace(go.Bar(x=xmid, y=hist_vals, opacity=0.7, name="Density"))
-        fig_pdf.update_layout(
-            title="CAGR distribution (annualized)",
-            xaxis_title="CAGR", yaxis_title="Density"
-        )
-        st.plotly_chart(fig_pdf, use_container_width=True)
+        st.markdown("### 💶 Required Annual Contribution")
+        if A_valid.size > 0:
+            A_mediana = float(np.median(A_valid))
+            A_p5      = float(np.percentile(A_valid, 5))
+            A_p95     = float(np.percentile(A_valid, 95))
 
-        # 6) Histograma do retorno terminal
-        ret_final = vt / capital_inicial - 1.0
-        h2, b2 = np.histogram(ret_final, bins=60, density=True)
-        x2 = (b2[:-1] + b2[1:]) / 2.0
-        fig_hist = go.Figure()
-        fig_hist.add_trace(go.Bar(x=x2, y=h2, opacity=0.7, name="Density"))
-        fig_hist.update_layout(
-            title="Terminal return distribution (V_T / V_0 − 1)",
-            xaxis_title="Terminal return", yaxis_title="Density"
-        )
-        st.plotly_chart(fig_hist, use_container_width=True)
+            # --- parâmetros atuariais exibidos abaixo ---
+            res = st.session_state.get("actuarial_result", {}) or {}
+            ui  = st.session_state.get("user_inputs", {}) or {}
+            objetivo_res_calc = float(res.get("reserva_aposentadoria", float("nan")))
+            taxa_juros_calc   = float(ui.get("taxa_juros", 0.0))
+            idade_atual       = ui.get("idade_atual", None)
+            idade_apos        = ui.get("idade_apos", None)
 
-        # 7) CDF empírica
-        orden = np.sort(ret_final)
-        cdf = np.linspace(0, 1, len(orden))
-        fig_cdf = go.Figure()
-        fig_cdf.add_trace(go.Scatter(x=orden, y=cdf, mode="lines", name="CDF"))
-        fig_cdf.update_layout(
-            title="Cumulative distribution (terminal return)",
-            xaxis_title="Terminal return", yaxis_title="Cumulative prob."
-        )
-        st.plotly_chart(fig_cdf, use_container_width=True)
-
-        # 8) Aporte anual (modelo 2: ignorar capital inicial)
-        if objetivo_reserva is not None and np.isfinite(objetivo_reserva) and fatores_anuais is not None:
-            A_sem = calcular_aporte_anual_sem_capital(
-                fatores_anuais=fatores_anuais,
-                FV_objetivo=float(objetivo_reserva)
+            st.caption(
+                f"On average, the 'Annual Contribution (Median)' value of {A_mediana:,.2f}  represents the amount you need to save annually and invest in this portfolio, with the given weights, to potentially achieve your retirement goal of {objetivo_res_calc:,.2f}."
             )
-            A_valid = A_sem[np.isfinite(A_sem)]
 
-            st.markdown("### 💶 Required Annual Contribution")
-            if A_valid.size > 0:
-                A_mediana = float(np.median(A_valid))
-                A_p5      = float(np.percentile(A_valid, 5))
-                A_p95     = float(np.percentile(A_valid, 95))
+            d1, d2, d3, d4 = st.columns(4)
+            d1.metric("Annual Contribution (Median)", f"{A_mediana:,.2f} ", help="The median annual contribution represents the typical amount you need to save each year to reach your retirement goal, based on the portfolio's performance.")
+            d2.metric("Annual Contribution (P5)",     f"{A_p5:,.2f} ", help="The 5th percentile annual contribution indicates a more optimistic scenario where you need to save less annually to achieve your goal.")
+            d3.metric("Annual Contribution (P95)",    f"{A_p95:,.2f} ", help="The 95th percentile annual contribution represents a more conservative scenario where you need to save more annually to achieve your goal.")
+            d4.metric("Horizon",                      f"{n_anos} years", help="The investment horizon is the number of years you plan to save and invest to reach your retirement goal.")
 
-                d1, d2, d3, d4 = st.columns(4)
-                d1.metric("Annual Contribution (Median)", f"{A_mediana:,.2f} €")
-                d2.metric("Annual Contribution (P5)",     f"{A_p5:,.2f} €")
-                d3.metric("Annual Contribution (P95)",    f"{A_p95:,.2f} €")
-                d4.metric("Horizon",                      f"{n_anos} years")
-
-                # --- parâmetros atuariais exibidos abaixo ---
-                res = st.session_state.get("actuarial_result", {}) or {}
-                ui  = st.session_state.get("user_inputs", {}) or {}
-                objetivo_res_calc = float(res.get("reserva_aposentadoria", float("nan")))
-                taxa_juros_calc   = float(ui.get("taxa_juros", 0.0))
-                idade_atual       = ui.get("idade_atual", None)
-                idade_apos        = ui.get("idade_apos", None)
-
-                st.markdown("### 📊 Actuarial Parameters")
-                a1, a2, a3, a4 = st.columns(4)
-                a1.metric("Actuarial target (retirement)",
-                          f"{objetivo_res_calc:,.2f} €" if np.isfinite(objetivo_res_calc) else "—")
-                a2.metric("Discount/interest rate",
-                          f"{taxa_juros_calc*100:.2f}%" if np.isfinite(taxa_juros_calc) else "—")
-                if idade_atual is not None:
-                    a3.metric("Current age", f"{int(idade_atual)}")
-                if idade_apos is not None:
-                    a4.metric("Retirement age", f"{int(idade_apos)}")
+            st.markdown("### 📊 Actuarial Parameters", help="This section provides key actuarial parameters used to calculate your retirement goal and required contributions.")
+            a1, a2, a3, a4 = st.columns(4)
+            a1.metric("Actuarial target (retirement)",
+                      f"{objetivo_res_calc:,.2f} " if np.isfinite(objetivo_res_calc) else "—",
+                      help="The actuarial target is the total amount you aim to accumulate by the time you retire.")
+            a2.metric("Discount/interest rate",
+                      f"{taxa_juros_calc*100:.2f}%" if np.isfinite(taxa_juros_calc) else "—",
+                      help="The discount or interest rate is the assumed annual return on your investments.")
+            if idade_atual is not None:
+                a3.metric("Current age", f"{int(idade_atual)}", help="Your current age, used to calculate the time remaining until retirement.")
+            if idade_apos is not None:
+                a4.metric("Retirement age", f"{int(idade_apos)}", help="Your planned retirement age, used to determine the investment horizon.")
 
 
-                # --- distribuição do aporte ---
-                ha, ba = np.histogram(A_valid, bins=50, density=True)
-                xa = (ba[:-1] + ba[1:]) / 2.0
-                fig_A = go.Figure()
-                fig_A.add_trace(go.Bar(x=xa, y=ha, opacity=0.7, name="Density"))
-                fig_A.update_layout(
-                    title="Required annual contribution (distribution)",
-                    xaxis_title="Annual contribution (€)", yaxis_title="Density"
-                )
-                st.plotly_chart(fig_A, use_container_width=True)
-            
+            # --- distribuição do aporte ---
+            st.markdown(
+            "### Required annual contribution (distribution)",
+            help="This chart shows the distribution of required annual contributions to reach your retirement goal, helping you understand the range of possible savings amounts.")            
+            ha, ba = np.histogram(A_valid, bins=50, density=True)
+            xa = (ba[:-1] + ba[1:]) / 2.0
+            fig_A = go.Figure()
+            fig_A.add_trace(go.Bar(x=xa, y=ha, opacity=0.7, name="Density"))
+            fig_A.update_layout(
+                xaxis_title="Annual contribution", yaxis_title="Density"
+            )
+            st.plotly_chart(fig_A, use_container_width=True)
+            st.caption("The distribution of required annual contributions helps you understand the variability in the amount you need to save each year to reach your retirement goal, based on different market scenarios.")
 
-                # Evolution of reserve until retirement
-                G_med = np.median(fatores_anuais, axis=1)
-                V_path = [capital_inicial]
-                for k in range(n_anos):
-                    V_next = V_path[-1] * G_med[k] + A_mediana
-                    V_path.append(V_next)
-                anos_axis = np.arange(0, n_anos + 1, 1)
 
-                p_years = p["years"].values
-                p50_vals = p["p50"].values
-                p50_anual = []
-                for k in range(n_anos + 1):
-                    idx = int(np.argmin(np.abs(p_years - k)))
-                    p50_anual.append(p50_vals[idx])
+            # Evolution of reserve until retirement
+            G_med = np.median(fatores_anuais, axis=1)
+            V_path = [capital_inicial]
+            for k in range(n_anos):
+                V_next = V_path[-1] * G_med[k] + A_mediana
+                V_path.append(V_next)
+            anos_axis = np.arange(0, n_anos + 1, 1)
 
-                fig_ev = go.Figure()
-                fig_ev.add_trace(go.Bar(x=anos_axis, y=V_path,
-                                        name="Reserve with median annual contribution"))
-                fig_ev.add_trace(go.Scatter(x=anos_axis, y=p50_anual,
-                                            mode="lines+markers",
-                                            name="Median (no contributions)"))
-                fig_ev.update_layout(
-                    title="Evolution of reserve until retirement",
-                    xaxis_title="Years", yaxis_title="Value (€)", barmode="overlay", hovermode="x unified"
-                )
-                st.plotly_chart(fig_ev, use_container_width=True)
+            p_years = p["years"].values
+            p50_vals = p["p50"].values
+            p50_anual = []
+            for k in range(n_anos + 1):
+                idx = int(np.argmin(np.abs(p_years - k)))
+                p50_anual.append(p50_vals[idx])
 
-                # Cheque determinístico com CAGR mediano
-                r_med = float(r["cagr_mediana"])
-                if r_med > -0.9999:
-                    if abs(r_med) < 1e-12:
-                        A_det = (objetivo_reserva - capital_inicial) / max(1, n_anos)
-                    else:
-                        fator = (1 + r_med) ** n_anos
-                        A_det = (objetivo_reserva - capital_inicial * fator) / ((fator - 1) / r_med)
-                    st.caption(
-                        f"✅ Deterministic check (median CAGR ≈ {100*r_med:.2f}%): "
-                        f"≈ **{A_det:,.2f} €/year**"
-                    )
+            fig_ev = go.Figure()
+            fig_ev.add_trace(go.Bar(x=anos_axis, y=V_path,
+                                    name="Reserve with median annual contribution"))
+            fig_ev.add_trace(go.Scatter(x=anos_axis, y=p50_anual,
+                                        mode="lines+markers",
+                                        name="Median (no contributions)"))
+            fig_ev.update_layout(
+                title="Evolution of reserve until retirement",
+                xaxis_title="Years", yaxis_title="Value ()", barmode="overlay", hovermode="x unified"
+            )
+            st.plotly_chart(fig_ev, use_container_width=True)
+            st.caption("This chart illustrates how your portfolio reserve is expected to grow over time with the median annual contribution, compared to the median growth without additional contributions.")
+
+
+            # Cheque determinístico com CAGR mediano
+            r_med = float(r["cagr_mediana"])
+            if r_med > -0.9999:
+                if abs(r_med) < 1e-12:
+                    A_det = (objetivo_reserva - capital_inicial) / max(1, n_anos)
                 else:
-                    st.caption("⚠️ Median CAGR invalid for deterministic check.")
+                    fator = (1 + r_med) ** n_anos
+                    A_det = (objetivo_reserva - capital_inicial * fator) / ((fator - 1) / r_med)
+                st.caption(
+                    f"✅ Deterministic check (median CAGR ≈ {100*r_med:.2f}%): "
+                    f"≈ **{A_det:,.2f} /year**"
+                )
+            else:
+                st.caption("⚠️ Median CAGR invalid for deterministic check.")
 
         # 9) Nota
         st.caption("Notes: parameters estimated from daily log-returns of the portfolio. "
@@ -731,69 +942,93 @@ def mostrar_simulacao_carteira(
 
 
 #----------------------------------------------------------------------------------------------------------------------------------------------------------------------
-st.title("📊 Optimized Portfolio Dashboard")
+# 📊 Optimized Portfolio Dashboard
+st.title("Optimized Portfolio Dashboard")
 
-st.sidebar.header("Portfolio Settings")
-universo = carregar_universo()
+st.sidebar.header("Portfolio Configuration")
+st.sidebar.markdown("Use the options below to configure your portfolio and optimize it.")
 
-# Mandatory filter: Asset Type
+# Section: Asset Types
+st.sidebar.subheader("Asset Types")
+st.sidebar.markdown("Select one or more asset types to filter the available assets.")
 tipos = sorted(universo.get("Tipo de Ativo", pd.Series()).dropna().unique().tolist())
-tipo_escolhido = st.sidebar.selectbox("Asset Type", tipos)
-dados_filtrados = universo[universo["Tipo de Ativo"] == tipo_escolhido]
+tipos_escolhidos = st.sidebar.multiselect("Asset Types", tipos, help="Choose one or more asset types to include in your portfolio.")
 
-# Optional dynamic filters (Country, Sector, Industry)
-for coluna in ["País", "Setor", "Indústria"]:
-    if coluna in dados_filtrados.columns:
-        opcoes = sorted(dados_filtrados[coluna].dropna().unique())
-        if len(opcoes) > 1:
-            label = coluna
-            if coluna == "País":
-                label = "Country"
-            elif coluna == "Setor":
-                label = "Sector"
-            elif coluna == "Indústria":
-                label = "Industry"
-            escolha = st.sidebar.selectbox(label, ["All"] + opcoes)
-            if escolha != "All":
-                dados_filtrados = dados_filtrados[dados_filtrados[coluna] == escolha]
+# Filter data based on selected asset types
+dados_filtrados = universo[universo["Tipo de Ativo"].isin(tipos_escolhidos)] if tipos_escolhidos else universo
 
-# Multiselect: Nome Curto visível, Ticker interno
+# Section: Asset Selection
+st.sidebar.subheader("Asset Selection")
+st.sidebar.markdown("Search and select the assets to include in your portfolio.")
+
+# Group assets by categories for easier navigation
+categories = ["Tipo de Ativo"]
+selected_assets = []
+
+for category in categories:
+    if category in dados_filtrados.columns:
+        unique_values = sorted(dados_filtrados[category].dropna().unique())
+        for value in unique_values:
+            with st.sidebar.expander(f"{value}"):
+                filtered_assets = dados_filtrados[dados_filtrados[category] == value]
+
+                # Add Equity-specific filters inside the Equity expander
+                if value.lower() == "equity":
+                    st.markdown("Refine your equity selection using the filters below.")
+                    for coluna, label in zip(["País", "Setor", "Indústria"], ["Country", "Sector", "Industry"]):
+                        if coluna in filtered_assets.columns:
+                            opcoes = sorted(filtered_assets[coluna].dropna().unique())
+                            if len(opcoes) > 1:
+                                escolha = st.selectbox(label, ["All"] + opcoes, help=f"Filter equities by {label.lower()}.")
+                                if escolha != "All":
+                                    filtered_assets = filtered_assets[filtered_assets[coluna] == escolha]
+
+                # Multiselect for assets
+                asset_names = filtered_assets["Nome Curto"].tolist()
+                selected = st.multiselect(f"Select assets in {value}", asset_names, key=f"{category}_{value}")
+                selected_assets.extend(selected)
+
+# Map selected asset names to tickers
 nomes_para_tickers = dados_filtrados.set_index("Nome Curto")["Ticker"].dropna().to_dict()
-selecionados_nomes = st.sidebar.multiselect("Assets", list(nomes_para_tickers.keys()))
-selecionados = [nomes_para_tickers[nome] for nome in selecionados_nomes]
+selecionados = [nomes_para_tickers[nome] for nome in selected_assets]
 
-# Parâmetros adicionais
-anos = st.sidebar.slider("Investment Horizon (years)", 1, 20, 10)
-frequencia = st.sidebar.selectbox("Frequency", ["1d", "1wk", "1mo"])
-# 📌 Caixa para seleção de Benchmark (apenas ativos tipo "Index")
+# Section: Investment Parameters
+st.sidebar.subheader("Investment Parameters")
+st.sidebar.markdown("Define the parameters for your investment.")
+anos = st.sidebar.slider("Investment Horizon (years)", 1, 20, 10, help="Set the number of years for your investment horizon.")
+frequencia = st.sidebar.selectbox("Frequency", ["1d", "1wk", "1mo"], help="Choose the frequency of data for analysis.")
+
+# Section: Benchmark
+st.sidebar.subheader("Benchmark")
+st.sidebar.markdown("Select a benchmark to compare your portfolio's performance.")
 benchmarks_df = universo[universo["Tipo de Ativo"] == "INDEX"]
 benchmarks_opcoes = benchmarks_df.set_index("Nome Curto")["Ticker"].dropna().to_dict()
-benchmark_escolhido_nome = st.sidebar.selectbox("Benchmark", ["None"] + list(benchmarks_opcoes.keys()))
+benchmark_escolhido_nome = st.sidebar.selectbox("Benchmark", ["None"] + list(benchmarks_opcoes.keys()), help="Choose a benchmark index for comparison.")
 benchmark_ticker = benchmarks_opcoes.get(benchmark_escolhido_nome) if benchmark_escolhido_nome != "None" else None
-btn = st.sidebar.button("Optimize Portfolio")
 
+# Optimize Portfolio Button
+if st.sidebar.button("Optimize Portfolio"):
+    if selecionados:
+        data_inicio = pd.Timestamp.today() - pd.DateOffset(years=anos)
+        data_fim = pd.Timestamp.today()
+        dados = obter_dados(selecionados, data_inicio, data_fim, frequencia)
+        pesos = otimizar_carteira(dados)
+        metrics = calcular_metricas(dados, pesos)
 
-#----------------------------------------------------------------------------------------------------------------------------------------------------------------------
-if btn and selecionados:
-    data_inicio = pd.Timestamp.today() - pd.DateOffset(years=anos)
-    data_fim = pd.Timestamp.today()
-    dados = obter_dados(selecionados, data_inicio, data_fim, frequencia)
-    pesos = otimizar_carteira(dados)
-    metrics = calcular_metricas(dados, pesos)
+        mostrar_kpis(metrics)
+        mostrar_tabela_ativos(dados, pesos, nomes_para_tickers)
+        mostrar_graficos_ativos(pesos, anos, frequencia, nomes_para_tickers)
+        mostrar_performance(dados, pesos)
+        mostrar_fronteira_heatmap(dados, pesos)
+        mostrar_benchmark_simples(dados, pesos, benchmark_ticker=benchmark_ticker, nomes_para_tickers=nomes_para_tickers, anos=anos)
 
-    mostrar_kpis(metrics)
-    mostrar_tabela_ativos(dados, pesos)
-    mostrar_graficos_ativos(pesos, anos, frequencia)
-    mostrar_performance(dados, pesos)
-    mostrar_fronteira_heatmap(dados, pesos)
-    mostrar_benchmark_simples(dados, pesos, benchmark_ticker=benchmark_ticker, anos=anos)
+        n_anos, objetivo_reserva, info = obter_objetivo_atuarial()
+        resultado_mc = simular_monte_carlo_carteira(dados, pesos, capital_inicial=1_000.0, n_anos=n_anos, simulacoes=10_000)
+        mostrar_simulacao_carteira(resultado_mc, objetivo_reserva=objetivo_reserva)
 
-    n_anos, objetivo_reserva, info = obter_objetivo_atuarial()
-    resultado_mc = simular_monte_carlo_carteira(dados, pesos, capital_inicial=1_000.0, n_anos=n_anos, simulacoes=10_000)
-    mostrar_simulacao_carteira(resultado_mc, objetivo_reserva=objetivo_reserva)
+        st.write("Preview of loaded data:")
+        st.dataframe(dados.head())
+    else:
+        st.warning("Please select at least one asset to optimize the portfolio.")
 
-    st.write("Prévia dos dados carregados:")
-    
-    st.dataframe(dados.head())
-else:
-    st.info("Escolha os ativos e clique em Otimizar Carteira")
+st.caption("Disclaimer: This is a simulation tool. Past performance is not indicative of future results. The outcomes presented are based on historical data and assumptions, and actual results may vary.")

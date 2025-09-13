@@ -64,6 +64,9 @@ button[kind="primary"] {
 # =========================================================
 # Utilitários de UI (código em PT-BR; texto visível em EN)
 # =========================================================
+# =========================================================
+# Melhorias no Hero Section
+# =========================================================
 def hero():
     """Seção inicial com headline + CTAs diretos para as ferramentas."""
     c1, c2 = st.columns([1.25, 1], gap="large")
@@ -75,53 +78,49 @@ def hero():
             "a clear path from retirement goals to actionable allocations.</p>",
             unsafe_allow_html=True
         )
-        a, b, c = st.columns(3)
-        with a:
-            if st.button("🔢 Actuarial Calculator", type="primary", use_container_width=True):
-                st.switch_page("Actuarial/2_calculadora.py")
-        with b:
-            if st.button("📊 Portfolio Optimizer", type="primary", use_container_width=True):
-                st.switch_page("Wallet/4_wallet.py")
-        with c:
-            if st.button("📈 Stock Analysis", type="primary", use_container_width=True):
-                st.switch_page("Wallet/3_ativo.py")
+        # Adicionando botões mais destacados
+        st.markdown("<div style='display: flex; gap: 10px;'>", unsafe_allow_html=True)
+        if st.button("🔢 Actuarial Calculator", type="primary"):
+            st.switch_page("Actuarial/2_calculadora.py")
+        if st.button("📊 Portfolio Optimizer", type="primary"):
+            st.switch_page("Wallet/4_wallet.py")
+        if st.button("📈 Stock Analysis", type="primary"):
+            st.switch_page("Wallet/3_ativo.py")
+        st.markdown("</div>", unsafe_allow_html=True)
 
-        st.write("")
+        st.write("\n\n")  # Adiciona espaçamento extra para centralizar melhor
         st.markdown(
+            "<div style='text-align: center;'>"
             "<span class='badge'>Data-driven</span>"
             "<span class='badge'>Actuarial</span>"
             "<span class='badge'>Machine Learning</span>"
-            "<span class='badge'>Risk-aware</span>",
+            "<span class='badge'>Risk-aware</span>"
+            "</div>",
             unsafe_allow_html=True
         )
     with c2:
-        # Três métricas-resumo simples e autoexplicativas
+        st.markdown("<div style='margin-top: 80px;'>", unsafe_allow_html=True)  # Ajusta o alinhamento vertical
+        st.markdown("### Summary Metrics")
         st.metric("Approach", "Actuarial + ML")
         st.metric("Coverage", "Global assets")
         st.metric("Focus", "Clarity & Action")
+        st.markdown("</div>", unsafe_allow_html=True)
 
-def tool_card(emoji: str, title: str, desc_md: str, bullets: list[str], button_label: str, route: str):
-    """Card compacto e objetivo para cada ferramenta."""
-    st.markdown("<div class='card'>", unsafe_allow_html=True)
-    st.markdown(f"### {emoji} {title}")
-    st.markdown(desc_md)
-    for b in bullets:
-        st.markdown(f"- {b}")
-    st.write("")
-    if st.button(button_label, use_container_width=True):
-        st.switch_page(route)
-    st.markdown("</div>", unsafe_allow_html=True)
-
+# =========================================================
+# Melhorias no Quick Start
+# =========================================================
 def quick_start():
     """Pequena trilha de onboarding (5 passos)."""
     st.subheader("🚀 Quick Start")
-    st.markdown("""
-1. **Define your target**: retirement income and horizon.
-2. **Set assumptions**: interest/discount rate and mortality table.
-3. **Explore portfolios**: select assets and run the optimizer.
-4. **Drill into assets**: fundamentals, technicals, and forecasts.
-5. **Iterate & compare**: adjust inputs, validate risk/return, and refine.
-""")
+    st.markdown(
+        """
+        1. **Define your target**: retirement income and horizon.
+        2. **Set assumptions**: interest/discount rate and mortality table.
+        3. **Explore portfolios**: select assets and run the optimizer.
+        4. **Drill into assets**: fundamentals, technicals, and forecasts.
+        5. **Iterate & compare**: adjust inputs, validate risk/return, and refine.
+        """
+    )
 
 def highlights():
     """Três pontos de valor (curtos, sem poluição visual)."""
@@ -133,9 +132,39 @@ def highlights():
     with c:
         st.warning("**Balanced View**  \nActuarial rigor meets ML insights.")
 
+# =========================================================
+# Melhorias no Rodapé
+# =========================================================
 def footer():
     """Rodapé simples e discreto."""
     st.caption("This dashboard is for educational purposes and does not constitute financial advice.")
+    st.markdown(
+        "<div style='text-align: center; font-size: 0.9rem;'>"
+        "<a href='https://github.com/HolandaMaia/TFM'>GitHub Repository</a> "
+        "</div>",
+        unsafe_allow_html=True
+    )
+    st.markdown(
+        "<div style='text-align: center; margin-top: 10px; font-size: 0.9rem;'>"
+        "Created by <b>Matheus Holanda Maia</b>. Connect on <a href='https://www.linkedin.com/in/matheusholandamaia/' target='_blank'>LinkedIn</a>."
+        "</div>",
+        unsafe_allow_html=True
+    )
+
+# =========================================================
+# Função tool_card corrigida
+# =========================================================
+def tool_card(emoji: str, title: str, desc_md: str, bullets: list[str], button_label: str, route: str):
+    """Card compacto e objetivo para cada ferramenta."""
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown(f"### {emoji} {title}")
+    st.markdown(desc_md)
+    for b in bullets:
+        st.markdown(f"- {b}")
+    st.write("")
+    if st.button(button_label, use_container_width=True):
+        st.switch_page(route)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================================================
 # Layout da Home
