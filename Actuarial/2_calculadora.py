@@ -279,7 +279,7 @@ taxa_juros = st.sidebar.number_input(
 ) / 100
 
 # Calculate button
-if st.sidebar.button("Calcular Reserva"):
+if st.sidebar.button("Calculate Reserve", type="primary", use_container_width=True):
     res = calcular_reserva(df_mortalidade, regiao, idade_atual, idade_apos, renda_mensal, taxa_juros)
     df_regiao = df_mortalidade[df_mortalidade['local'] == regiao].sort_values(by='idade')
     if res:
