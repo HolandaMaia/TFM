@@ -3,44 +3,47 @@
 
 ![Streamlit](https://img.shields.io/badge/Streamlit-App-orange)
 
+🔗 **Live Demo**: [Can I Retire Yet?](https://caniretireyet.streamlit.app/)  
 
-This project is a practical simulation tool developed by Matheus Holanda Maia. It integrates actuarial modeling with investment portfolio optimization to answer a key financial planning question:
+This project is a practical simulation tool developed by **Matheus Holanda Maia**.  
+It integrates **actuarial modeling** with **investment portfolio optimization** to answer a key financial planning question:
 
 > What periodic contributions are needed in an investment portfolio to reach the actuarial reserve required at retirement?
 
-Unlike traditional approaches that separately analyze pension sufficiency or investment returns, this project combines both perspectives into a unified framework. The actuarial reserve becomes the financial target, and the investment strategy is optimized to achieve it.
+Unlike traditional approaches that separately analyze pension sufficiency or investment returns, this project combines both perspectives into a **unified framework**. The actuarial reserve becomes the financial target, and the investment strategy is optimized to achieve it.
 
 ---
 
 ## 🎯 Key Features
 
-
+- Actuarial calculator based on UN mortality tables
 - Financial data retrieval via Yahoo Finance
-- Time series modeling using ARIMA and GARCH
+- Time series econometric modeling (ARMA-GARCH)
 - Interactive visualizations with Plotly
-- Portfolio optimization with PyPortfolioOpt
-- Actuarial modeling using pyliferisk
+- Portfolio optimization using Modern Portfolio Theory (Markowitz)
+- Monte Carlo simulation of retirement outcomes
 - User-friendly interface built with Streamlit
 
 ---
 
 ## 🔍 Data Sources
 
-- Mortality Tables: United Nations (World Population Prospects, 2016–2023)
-- Financial Data: Yahoo Finance API (stocks, ETFs, indices)
+- **Mortality Tables**: United Nations (World Population Prospects, 2016–2023)  
+- **Financial Data**: Yahoo Finance API (stocks, ETFs, indices)  
+
 ---
 
-## Technologies and Libraries Used
+## 🛠️ Technologies and Libraries Used
 
-- Language: Python
-- Core Libraries:
-- Data Manipulation & Analysis: pandas, numpy
-- Visualization: plotly (including plotly.express and plotly.graph_objects), seaborn, matplotlib
-- User Interface: streamlit
-- Statistical & Time Series Modeling: statsmodels (ARIMA), arch (GARCH)
-- Evaluation Metrics: sklearn.metrics (MAPE)
-- Portfolio Optimization: PyPortfolioOpt
-- Actuarial Modeling: pyliferisk
+- **Language**: Python  
+- **Core Libraries**:  
+  - Data Manipulation: `pandas`, `numpy`  
+  - Visualization: `plotly`, `seaborn`, `matplotlib`  
+  - User Interface: `streamlit`  
+  - Time Series Modeling: `statsmodels` (ARMA), `arch` (GARCH)  
+  - Evaluation Metrics: `sklearn.metrics` (MAPE)  
+  - Portfolio Optimization: `PyPortfolioOpt`  
+  - Actuarial Modeling: `pyliferisk`  
 
 ---
 
