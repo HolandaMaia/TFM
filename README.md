@@ -47,13 +47,26 @@ Unlike traditional approaches that separately analyze pension sufficiency or inv
 
 ## 📂 Repository Structure
 
-```
-├── app/                # Streamlit application code
-├── data/               # Input data (mortality tables, etc.)
-├── notebooks/          # Exploratory analysis and tests
-├── requirements.txt    # Project dependencies
-└── README.md           # This file
-```
+├── Actuarial/ 
+│ ├── 1_apage1.py
+│ └── 2_calculadora.py
+│
+├── Homepage/ 
+│ └── 1_Homepage.py
+│
+├── Wallet/ 
+│ ├── 3_ativo.py
+│ └── 4_wallet.py
+│
+├── dados/ 
+│ ├── ativos_totais.xlsx
+│ └── WPP2024_MORT_F06_1_SINGLE_AGE_LIFE_TABLE_ESTIMATES_BOTH_SEXES.xlsx
+│
+├── app.py 
+├── requirements.txt # Dependências do projeto
+├── README.md # Documentação principal
+├── LICENSE # Licença do projeto
+└── .gitignore # Arquivos e pastas ignorados pelo Git
 
 ---
 
