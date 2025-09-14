@@ -50,18 +50,18 @@ Unlike traditional approaches that separately analyze pension sufficiency or inv
 ├── Actuarial/ 
 │ ├── 1_apage1.py
 │ └── 2_calculadora.py
-│
+
 ├── Homepage/ 
 │ └── 1_Homepage.py
-│
+
 ├── Wallet/ 
 │ ├── 3_ativo.py
 │ └── 4_wallet.py
-│
+
 ├── dados/ 
 │ ├── ativos_totais.xlsx
 │ └── WPP2024_MORT_F06_1_SINGLE_AGE_LIFE_TABLE_ESTIMATES_BOTH_SEXES.xlsx
-│
+
 ├── app.py 
 ├── requirements.txt 
 ├── README.md 
