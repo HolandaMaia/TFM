@@ -63,10 +63,10 @@ Unlike traditional approaches that separately analyze pension sufficiency or inv
 │ └── WPP2024_MORT_F06_1_SINGLE_AGE_LIFE_TABLE_ESTIMATES_BOTH_SEXES.xlsx
 │
 ├── app.py 
-├── requirements.txt # Dependências do projeto
-├── README.md # Documentação principal
-├── LICENSE # Licença do projeto
-└── .gitignore # Arquivos e pastas ignorados pelo Git
+├── requirements.txt 
+├── README.md 
+├── LICENSE 
+└── .gitignore 
 
 ---
 
