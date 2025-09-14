@@ -1,8 +1,6 @@
 
 # Modelo Integrado de Cálculo Actuarial y Optimización de Carteras para la Planificación de la Jubilación
 
-![Streamlit](https://img.shields.io/badge/Streamlit-App-orange)
-
 🔗 **Live Demo**: [Can I Retire Yet?](https://caniretireyet.streamlit.app/)  
 
 This project is a practical simulation tool developed by **Matheus Holanda Maia**.  
