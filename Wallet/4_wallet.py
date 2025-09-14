@@ -66,6 +66,8 @@ def calcular_metricas(dados, pesos):
     drawdown = ((cum_returns - running_max) / running_max).min()
     num_assets = len(pesos)
     std = returns.std() * np.sqrt(252)
+    # The code is calculating the cumulative return for a given time period by subtracting 1 from the
+    # last value in the `cum_returns` DataFrame.
     acumulado_1y = cum_returns.iloc[-1] - 1
     return port_return, port_vol, sharpe, drawdown, num_assets, std.mean(), acumulado_1y
 
@@ -120,7 +122,7 @@ def mostrar_kpis(metrics):
 
 def mostrar_performance(dados, pesos):
     st.subheader("Historical Performance", divider='blue')
-    returns = np.log(dados / dados.shift(1)).dropna()
+    returns = dados.pct_change().dropna()
     carteira = (1 + returns.dot(pesos)).cumprod()
     drawdown = carteira / carteira.cummax() - 1
 
@@ -403,7 +405,7 @@ def mostrar_benchmark_simples(dados, pesos, benchmark_ticker, nomes_para_tickers
     benchmark_ret_pct = (benchmark_ret - 1) * 100
 
     # Retorno acumulado da carteira em %
-    returns = np.log(dados / dados.shift(1)).dropna()
+    returns = dados.pct_change().dropna()
     carteira = (1 + returns.dot(pesos)).cumprod()
     carteira_pct = (carteira - 1) * 100
 
@@ -748,9 +750,9 @@ def mostrar_simulacao_carteira(
 
     # 3) KPIs principais
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Median terminal ()", f"{r['mediana_final']:,.0f}", help="The median terminal value represents the middle value of all simulated portfolio outcomes at the end of the investment horizon.")
-    c2.metric("P5 terminal ()",     f"{r['p5_final']:,.0f}", help="The 5th percentile terminal value indicates the value below which only 5% of the simulated outcomes fall, representing a pessimistic scenario.")
-    c3.metric("P95 terminal ()",    f"{r['p95_final']:,.0f}", help="The 95th percentile terminal value indicates the value above which only 5% of the simulated outcomes fall, representing an optimistic scenario.")
+    c1.metric("Median terminal", f"{r['mediana_final']:,.0f}", help="The median terminal value represents the middle value of all simulated portfolio outcomes at the end of the investment horizon.")
+    c2.metric("P5 terminal",     f"{r['p5_final']:,.0f}", help="The 5th percentile terminal value indicates the value below which only 5% of the simulated outcomes fall, representing a pessimistic scenario.")
+    c3.metric("P95 terminal",    f"{r['p95_final']:,.0f}", help="The 95th percentile terminal value indicates the value above which only 5% of the simulated outcomes fall, representing an optimistic scenario.")
     c4.metric("Loss probability",     f"{100*r['prob_perda']:.1f}%", help="The probability of loss shows the likelihood of the portfolio ending with a value lower than the initial capital.")
 
     c5, c6, c7 = st.columns(3)
